@@ -4,6 +4,8 @@ import (
 	"os"
 	"time"
 
+	"goauth/internal/constants"
+
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -13,7 +15,7 @@ var Logger zerolog.Logger
 func Init(env string) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	if env == "development" {
+	if env == constants.DEVELOPMENT {
 		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
 		Logger = zerolog.New(output).With().Timestamp().Caller().Logger()
 	} else {
