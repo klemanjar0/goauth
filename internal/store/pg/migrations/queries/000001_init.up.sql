@@ -1,8 +1,11 @@
+-- migrations/000001_init_schema.up.sql
 -- users
 create table users (
     id uuid primary key default gen_random_uuid(),
     email text unique not null,
     password_hash text not null,
+    permissions bigint not null default 0,
+    -- битовая маска
     is_active bool default true,
     email_confirmed bool default false,
     created_at timestamptz default now(),
@@ -11,27 +14,6 @@ create table users (
 create index idx_users_email on users(email);
 create index idx_users_active on users(is_active)
 where is_active = true;
--- roles and permissions
-create table roles (
-    id serial primary key,
-    name text unique not null,
-    description text
-);
-create table permissions (
-    id serial primary key,
-    name text unique not null,
-    description text
-);
-create table role_permissions (
-    role_id int references roles(id) on delete cascade,
-    permission_id int references permissions(id) on delete cascade,
-    primary key (role_id, permission_id)
-);
-create table user_roles (
-    user_id uuid references users(id) on delete cascade,
-    role_id int references roles(id) on delete cascade,
-    primary key (user_id, role_id)
-);
 -- refresh tokens
 create table refresh_tokens (
     id uuid primary key default gen_random_uuid(),
