@@ -1,10 +1,9 @@
 package logger
 
 import (
+	"goauth/internal/constants"
 	"os"
 	"time"
-
-	"goauth/internal/constants"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"

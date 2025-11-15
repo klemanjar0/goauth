@@ -18,7 +18,7 @@ func (e Failure) Error() string {
 	return e.Message
 }
 
-func (e Failure) Wrap(err error) Failure {
+func (e Failure) WithErr(err error) Failure {
 	return Failure{
 		Code:    e.Code,
 		Message: e.Message,
@@ -36,6 +36,10 @@ func (e Failure) LogFatal() {
 
 func (err Failure) Log() {
 	logger.Info().Int("code", err.Code).Msg(err.Message)
+}
+
+func (err Failure) Warn() {
+	logger.Warn().Int("code", err.Code).Msg(err.Message)
 }
 
 func (e Failure) LogError() {

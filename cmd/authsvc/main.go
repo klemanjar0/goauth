@@ -4,21 +4,33 @@ import (
 	"os"
 
 	"goauth/internal/constants"
+	"goauth/internal/failure"
+	"goauth/internal/logger"
+	"goauth/internal/store"
 
 	"github.com/joho/godotenv"
-	"goauth/internal/logger"
 )
 
 func init() {
-	if os.Getenv(constants.ENV) == constants.DEVELOPMENT {
-		if err := godotenv.Load(); err != nil {
-			constants.EnvironmentLocalFileError.Log(logger.Warn())
-		}
+	if err := godotenv.Load(); err != nil {
+		failure.EnvironmentLocalFileError.WithErr(err).Warn()
 	}
+}
+
+func setupPort() string {
+	port := os.Getenv(constants.PortEnv)
+	if port == "" {
+		port = "8080"
+		failure.EnvironmentPortError.Warn()
+	}
+
+	return port
 }
 
 func main() {
 	logger.Init(os.Getenv(constants.ENV))
-	logger.Info().Msg("Starting auth service.")
-
+	servicePort := setupPort()
+	logger.Info().Msg("starting auth service on a port " + servicePort)
+	db := store.InitializeDB()
+	defer db.Close()
 }

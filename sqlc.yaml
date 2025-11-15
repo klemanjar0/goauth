@@ -1,0 +1,9 @@
+version: "2"
+sql:
+  - schema: "internal/store/pg/schema.sql"
+    queries: "internal/store/pg/queries/"
+    engine: "postgresql"
+    gen:
+      go:
+        package: "src"
+        out: "../internal/src"
