@@ -4,7 +4,7 @@ import (
 	"os"
 
 	"goauth/internal/constants"
-	"goauth/internal/logger"
+	"goauth/internal/failure"
 	_ "goauth/internal/store/migrations"
 )
 
@@ -12,7 +12,7 @@ func InitializeDB() {
 	dbConnString := os.Getenv(constants.DBConnEnv)
 
 	if dbConnString == "" {
-		constants.EnvironmentVariableError.Log(logger.Fatal())
+		failure.EnvironmentVariableError.LogFatal()
 	}
 
 	//migrations.RunMigrations(db)
