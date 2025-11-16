@@ -1,21 +1,35 @@
 package server
 
 import (
+	"database/sql"
 	"goauth/internal/middleware"
+	"goauth/internal/store/pg/repository"
+	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 )
 
 type Server struct {
-	router *chi.Mux
+	DB             *sql.DB
+	Queries        *repository.Queries
+	App            *chi.Mux
+	ServerInstance *http.Server
 }
 
-func New() Server {
+func New(db *sql.DB, q *repository.Queries, port string) *Server {
 	r := chi.NewRouter()
 
-	s := Server{
-		router: r,
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+	}
+
+	s := &Server{
+		App:            r,
+		DB:             db,
+		Queries:        q,
+		ServerInstance: server,
 	}
 
 	s.setupRoutes()
@@ -24,7 +38,7 @@ func New() Server {
 }
 
 func (s Server) setupRoutes() {
-	s.router.Use(chimiddleware.RequestID)
-	s.router.Use(middleware.RequestLogger)
-	s.router.Use(middleware.Recoverer)
+	s.App.Use(chimiddleware.RequestID)
+	s.App.Use(middleware.RequestLogger)
+	s.App.Use(middleware.Recoverer)
 }

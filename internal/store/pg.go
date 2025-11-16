@@ -23,7 +23,7 @@ func InitializeDB() *sql.DB {
 	}
 
 	if err := migrations.RunMigrations(db); err != nil {
-		failure.DatabaseMigrationError.WithErr(dbErr).LogFatal()
+		failure.DatabaseMigrationError.WithErr(err).LogFatal()
 	}
 
 	return db

@@ -1,6 +1,6 @@
 package constants
 
-type Permission int64
+type Permission uint32
 
 const (
 	PermNone Permission = 0

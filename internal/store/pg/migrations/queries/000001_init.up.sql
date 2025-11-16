@@ -1,11 +1,9 @@
--- migrations/000001_init_schema.up.sql
 -- users
 create table users (
     id uuid primary key default gen_random_uuid(),
     email text unique not null,
     password_hash text not null,
     permissions bigint not null default 0,
-    -- битовая маска
     is_active bool default true,
     email_confirmed bool default false,
     created_at timestamptz default now(),

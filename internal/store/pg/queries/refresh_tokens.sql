@@ -1,6 +1,6 @@
 -- name: CreateRefreshToken :one
 insert into refresh_tokens (user_id, device_info, expires_at, rotated_from)
-values ($1, $2, $3, sqlc.narg('rotated_from'))
+values ($1, $2, $3, $4)
 returning *;
 -- name: GetRefreshToken :one
 select *
@@ -25,7 +25,7 @@ where user_id = $1
 with recursive token_family as (
   select id
   from refresh_tokens
-  where id = $1
+  where refresh_tokens.id = $1
   union
   select rt.id
   from refresh_tokens rt

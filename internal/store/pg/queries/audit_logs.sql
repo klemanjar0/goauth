@@ -1,12 +1,6 @@
 -- name: CreateAuditLog :one
 insert into audit_logs (user_id, event_type, ip, ua, payload)
-values (
-        sqlc.narg('user_id'),
-        $1,
-        sqlc.narg('ip'),
-        sqlc.narg('ua'),
-        sqlc.narg('payload')
-    )
+values ($1, $2, $3, $4, $5)
 returning *;
 -- name: GetAuditLogsByUser :many
 select *

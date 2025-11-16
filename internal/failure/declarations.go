@@ -26,4 +26,12 @@ var (
 		Code:    0xE006,
 		Message: "database failed to run migrations",
 	}
+	FailedToStartServerError = Failure{
+		Code:    0xE007,
+		Message: "server failed to start",
+	}
+	ForcedShutdownServerError = Failure{
+		Code:    0xE007,
+		Message: "server forced to shutdown",
+	}
 )

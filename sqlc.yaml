@@ -5,5 +5,5 @@ sql:
     engine: "postgresql"
     gen:
       go:
-        package: "src"
-        out: "../internal/src"
+        package: "repository"
+        out: "./internal/store/pg/repository"
