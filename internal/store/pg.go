@@ -6,24 +6,28 @@ import (
 
 	"goauth/internal/constants"
 	"goauth/internal/failure"
+	"goauth/internal/logger"
 	"goauth/internal/store/pg/migrations"
 )
 
 func InitializeDB() *sql.DB {
-	dbConnString := os.Getenv(constants.DBConnEnv)
+	dbConnString := os.Getenv(constants.DB_CONN)
 
 	if dbConnString == "" {
-		failure.EnvironmentDatabaseError.LogFatal()
+		code, msg := failure.EnvironmentDatabaseError.Get()
+		logger.Fatal().Int("code", code).Msg(msg)
 	}
 
-	db, dbErr := sql.Open("postgres", dbConnString)
+	db, err := sql.Open("postgres", dbConnString)
+	if err != nil {
+		code, msg := failure.DatabaseInitializationError.Get()
+		logger.Fatal().Err(err).Int("code", code).Msg(msg)
 
-	if dbErr != nil {
-		failure.DatabaseInitializationError.WithErr(dbErr).LogFatal()
 	}
 
 	if err := migrations.RunMigrations(db); err != nil {
-		failure.DatabaseMigrationError.WithErr(err).LogFatal()
+		code, msg := failure.DatabaseMigrationError.Get()
+		logger.Fatal().Err(err).Int("code", code).Msg(msg)
 	}
 
 	return db

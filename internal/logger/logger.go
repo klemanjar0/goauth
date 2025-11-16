@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"goauth/internal/constants"
 	"os"
 	"time"
 
@@ -11,10 +10,10 @@ import (
 
 var Logger zerolog.Logger
 
-func Init(env string) {
+func Init(isDevelopment bool) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	if env == constants.DEVELOPMENT {
+	if isDevelopment {
 		output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
 		Logger = zerolog.New(output).With().Timestamp().Caller().Logger()
 	} else {

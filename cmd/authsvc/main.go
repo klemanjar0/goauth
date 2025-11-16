@@ -8,47 +8,32 @@ import (
 	"syscall"
 	"time"
 
-	"goauth/internal/constants"
+	"goauth/internal/config"
 	"goauth/internal/failure"
 	"goauth/internal/logger"
 	"goauth/internal/server"
 	"goauth/internal/store"
 	"goauth/internal/store/pg/repository"
-
-	"github.com/joho/godotenv"
 )
 
-func init() {
-	if err := godotenv.Load(); err != nil {
-		failure.EnvironmentLocalFileError.WithErr(err).Warn()
-	}
-}
-
-func setupPort() string {
-	port := os.Getenv(constants.PortEnv)
-	if port == "" {
-		port = "8080"
-		failure.EnvironmentPortError.Warn()
-	}
-
-	return port
-}
-
 func main() {
-	logger.Init(os.Getenv(constants.ENV))
-	servicePort := setupPort()
+	cfg := config.Load()
+	logger.Init(cfg.IsDevelopment)
+	logger.Info().Msg("logger ready for use")
 	db := store.InitializeDB()
 	defer db.Close()
 
-	queries := repository.New(db)
-	s := server.New(db, queries, servicePort)
+	redisClient := store.InitRedisClient(cfg)
+	defer redisClient.Close()
 
-	logger.Info().Msg("starting auth service on a port " + servicePort)
+	queries := repository.New(db)
+	s := server.New(db, queries, cfg)
 
 	go func() {
 		logger.Info().Str("addr", s.ServerInstance.Addr).Msg("starting server")
 		if err := s.ServerInstance.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			failure.FailedToStartServerError.WithErr(err).LogFatal()
+			code, msg := failure.FailedToStartServerError.Get()
+			logger.Fatal().Err(err).Int("code", code).Msg(msg)
 		}
 	}()
 
@@ -62,7 +47,8 @@ func main() {
 	defer cancel()
 
 	if err := s.ServerInstance.Shutdown(ctx); err != nil {
-		failure.ForcedShutdownServerError.WithErr(err).LogFatal()
+		code, msg := failure.ForcedShutdownServerError.Get()
+		logger.Fatal().Err(err).Int("code", code).Msg(msg)
 	}
 
 	logger.Info().Msg("server stopped gracefully")

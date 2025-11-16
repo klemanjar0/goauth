@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"goauth/internal/config"
 	"goauth/internal/middleware"
 	"goauth/internal/store/pg/repository"
 	"net/http"
@@ -17,11 +18,11 @@ type Server struct {
 	ServerInstance *http.Server
 }
 
-func New(db *sql.DB, q *repository.Queries, port string) *Server {
+func New(db *sql.DB, q *repository.Queries, c *config.Config) *Server {
 	r := chi.NewRouter()
 
 	server := &http.Server{
-		Addr:    ":" + port,
+		Addr:    ":" + c.Port,
 		Handler: r,
 	}
 
