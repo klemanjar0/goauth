@@ -30,8 +30,7 @@ func InitRedisClient(cfg *config.Config) *RedisClient {
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		code, msg := failure.RedisClientError.Get()
-		logger.Fatal().Err(err).Int("code", code).Msg(msg)
+		logger.Fatal().Err(err).Msg(failure.ErrRedisClient.Error())
 	}
 
 	logger.Info().Msg("redis successfully connected")

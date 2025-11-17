@@ -3,7 +3,10 @@ package server
 import (
 	"database/sql"
 	"goauth/internal/config"
+	"goauth/internal/handler"
 	"goauth/internal/middleware"
+	"goauth/internal/service"
+	"goauth/internal/store"
 	"goauth/internal/store/pg/repository"
 	"net/http"
 
@@ -16,9 +19,10 @@ type Server struct {
 	Queries        *repository.Queries
 	App            *chi.Mux
 	ServerInstance *http.Server
+	Redis          *store.RedisClient
 }
 
-func New(db *sql.DB, q *repository.Queries, c *config.Config) *Server {
+func New(db *sql.DB, q *repository.Queries, c *config.Config, redis *store.RedisClient) *Server {
 	r := chi.NewRouter()
 
 	server := &http.Server{
@@ -31,6 +35,7 @@ func New(db *sql.DB, q *repository.Queries, c *config.Config) *Server {
 		DB:             db,
 		Queries:        q,
 		ServerInstance: server,
+		Redis:          redis,
 	}
 
 	s.setupRoutes()
@@ -38,8 +43,22 @@ func New(db *sql.DB, q *repository.Queries, c *config.Config) *Server {
 	return s
 }
 
-func (s Server) setupRoutes() {
+func (s *Server) setupRoutes() {
+	service := service.NewUserService(s.DB, s.Redis.Client)
+	handler := handler.NewUserHandler(service)
+
 	s.App.Use(chimiddleware.RequestID)
 	s.App.Use(middleware.RequestLogger)
 	s.App.Use(middleware.Recoverer)
+
+	s.App.Route("/v1", func(r chi.Router) {
+		r.Post("/register", handler.Register)
+		r.Post("/login", handler.Login)
+		r.Post("/refresh", handler.RefreshToken)
+		r.Post("/verify", handler.VerifyToken)
+		r.Get("/health", handler.HealthCheck)
+	})
+
+	s.App.NotFound(handler.NotFound)
+	s.App.MethodNotAllowed(handler.MethodNotAllowed)
 }

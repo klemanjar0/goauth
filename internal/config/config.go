@@ -28,8 +28,7 @@ type Config struct {
 func Load() *Config {
 	logger.Info().Msg("loading service configuration")
 	if err := godotenv.Load(); err != nil {
-		code, msg := failure.EnvironmentLocalFileError.Get()
-		logger.Warn().Err(err).Int("code", code).Msg(msg)
+		logger.Warn().Err(err).Msg(failure.ErrEnvironmentLocalFile.Error())
 	}
 
 	isDev := getEnv(constants.ENV, constants.DEVELOPMENT) == constants.DEVELOPMENT

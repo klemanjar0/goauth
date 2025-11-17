@@ -14,20 +14,18 @@ func InitializeDB() *sql.DB {
 	dbConnString := os.Getenv(constants.DB_CONN)
 
 	if dbConnString == "" {
-		code, msg := failure.EnvironmentDatabaseError.Get()
-		logger.Fatal().Int("code", code).Msg(msg)
+		msg := failure.ErrEnvironmentDatabase.Error()
+		logger.Fatal().Msg(msg)
 	}
 
 	db, err := sql.Open("postgres", dbConnString)
 	if err != nil {
-		code, msg := failure.DatabaseInitializationError.Get()
-		logger.Fatal().Err(err).Int("code", code).Msg(msg)
+		logger.Fatal().Err(err).Msg(failure.ErrDatabaseInitialization.Error())
 
 	}
 
 	if err := migrations.RunMigrations(db); err != nil {
-		code, msg := failure.DatabaseMigrationError.Get()
-		logger.Fatal().Err(err).Int("code", code).Msg(msg)
+		logger.Fatal().Err(err).Msg(failure.ErrDatabaseMigration.Error())
 	}
 
 	return db

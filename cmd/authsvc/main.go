@@ -27,13 +27,12 @@ func main() {
 	defer redisClient.Close()
 
 	queries := repository.New(db)
-	s := server.New(db, queries, cfg)
+	s := server.New(db, queries, cfg, redisClient)
 
 	go func() {
 		logger.Info().Str("addr", s.ServerInstance.Addr).Msg("starting server")
 		if err := s.ServerInstance.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			code, msg := failure.FailedToStartServerError.Get()
-			logger.Fatal().Err(err).Int("code", code).Msg(msg)
+			logger.Fatal().Err(err).Msg(failure.ErrFailedToStartServer.Error())
 		}
 	}()
 
@@ -47,8 +46,7 @@ func main() {
 	defer cancel()
 
 	if err := s.ServerInstance.Shutdown(ctx); err != nil {
-		code, msg := failure.ForcedShutdownServerError.Get()
-		logger.Fatal().Err(err).Int("code", code).Msg(msg)
+		logger.Fatal().Err(err).Msg(failure.ErrForcedShutdownServer.Error())
 	}
 
 	logger.Info().Msg("server stopped gracefully")

@@ -1,41 +1,39 @@
 package failure
 
-// -- Errors Declarations --
+import "errors"
+
+// -- Server Errors Declarations --
 var (
-	EnvironmentVariableError = &Failure{
-		Code:    0x0001,
-		Message: "environment variable missing",
-	}
-	EnvironmentLocalFileError = &Failure{
-		Code:    0x0002,
-		Message: "no .env file found, using system environment variables",
-	}
-	EnvironmentDatabaseError = &Failure{
-		Code:    0x0003,
-		Message: "no database connection string found",
-	}
-	EnvironmentPortError = &Failure{
-		Code:    0x0004,
-		Message: "port env variable is missing. applying default port 8080",
-	}
-	DatabaseInitializationError = &Failure{
-		Code:    0x0005,
-		Message: "database failed to init",
-	}
-	DatabaseMigrationError = &Failure{
-		Code:    0x0006,
-		Message: "database failed to run migrations",
-	}
-	FailedToStartServerError = &Failure{
-		Code:    0x0007,
-		Message: "server failed to start",
-	}
-	ForcedShutdownServerError = &Failure{
-		Code:    0x0008,
-		Message: "server forced to shutdown",
-	}
-	RedisClientError = &Failure{
-		Code:    0x0009,
-		Message: "failed to connect to redis",
-	}
+	ErrEnvironmentVariable    = errors.New("environment variable missing")
+	ErrEnvironmentLocalFile   = errors.New("no .env file found, using system environment variables")
+	ErrEnvironmentDatabase    = errors.New("no database connection string found")
+	ErrEnvironmentPort        = errors.New("port env variable is missing. applying default port 8080")
+	ErrDatabaseInitialization = errors.New("database failed to init")
+	ErrDatabaseMigration      = errors.New("database failed to run migrations")
+	ErrFailedToStartServer    = errors.New("server failed to start")
+	ErrForcedShutdownServer   = errors.New("server forced to shutdown")
+	ErrRedisClient            = errors.New("failed to connect to redis")
+	ErrServer                 = errors.New("server internal error")
+)
+
+// -- User Errors Declarations --
+var (
+	ErrInvalidEmail       = errors.New("invalid email format")
+	ErrPasswordTooShort   = errors.New("password must be at least 8 characters")
+	ErrPasswordTooWeak    = errors.New("password must contain uppercase, lowercase, number, and special character")
+	ErrUserAlreadyExists  = errors.New("user with this email already exists")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrInvalidCredentials = errors.New("invalid email or password")
+	ErrUserInactive       = errors.New("user account is inactive")
+	ErrEmailNotConfirmed  = errors.New("email address not confirmed")
+	ErrDatabaseError      = errors.New("database operation failed")
+	ErrPasswordHashError  = errors.New("failed to hash password")
+)
+
+// -- Token Errors Declarations --
+var (
+	ErrInvalidToken     = errors.New("invalid token")
+	ErrTokenExpired     = errors.New("token has expired")
+	ErrTokenRevoked     = errors.New("token has been revoked")
+	ErrTokenGeneration  = errors.New("failed to generate token")
 )
