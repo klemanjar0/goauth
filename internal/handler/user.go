@@ -338,6 +338,12 @@ func (h *UserHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 				Status(http.StatusInternalServerError).
 				Error(err).Message(failure.ErrServer.Error()).
 				Send()
+		case errors.Is(err, failure.ErrTokenRevoked):
+			internal.
+				Respond(w).
+				Status(http.StatusUnauthorized).
+				Error(err).Message(failure.ErrTokenRevoked.Error()).
+				Send()
 		default:
 			logger.Error().Err(err).Msg("unexpected error during token refresh")
 			internal.
