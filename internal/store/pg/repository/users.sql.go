@@ -86,8 +86,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 
 const updateUser = `-- name: UpdateUser :one
 update users
-set email = coalesce($2, email),
-    password_hash = coalesce($3, password_hash),
+set email = coalesce(nullif($2, ''), email),
+    password_hash = coalesce(nullif($3, ''), password_hash),
     permissions = coalesce($4, permissions),
     is_active = coalesce($5, is_active),
     email_confirmed = coalesce($6, email_confirmed)
@@ -97,8 +97,8 @@ returning id, email, password_hash, permissions, is_active, email_confirmed, cre
 
 type UpdateUserParams struct {
 	ID             uuid.UUID
-	Email          string
-	PasswordHash   string
+	Column2        interface{}
+	Column3        interface{}
 	Permissions    int64
 	IsActive       sql.NullBool
 	EmailConfirmed sql.NullBool
@@ -107,8 +107,8 @@ type UpdateUserParams struct {
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, updateUser,
 		arg.ID,
-		arg.Email,
-		arg.PasswordHash,
+		arg.Column2,
+		arg.Column3,
 		arg.Permissions,
 		arg.IsActive,
 		arg.EmailConfirmed,

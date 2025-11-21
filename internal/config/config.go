@@ -3,11 +3,13 @@ package config
 import (
 	"goauth/internal/auth"
 	"goauth/internal/constants"
+	"goauth/internal/email"
 	"goauth/internal/failure"
 	"goauth/internal/logger"
-	"time"
+	"strings"
 
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -23,6 +25,7 @@ type Config struct {
 	IsDevelopment bool
 	Port          string
 	RedisConfig   RedisConfig
+	KafkaBrokers  []string
 }
 
 func Load() *Config {
@@ -57,12 +60,23 @@ func Load() *Config {
 		RefreshTTL:    7 * 24 * time.Hour,
 	})
 
+	email.Init(email.Config{
+		SMTPHost: getEnv(constants.SMTP_HOST, "smtp.gmail.com"),
+		SMTPPort: getEnv(constants.SMTP_PORT, "587"),
+		SMTPUser: getEnv(constants.SMTP_USER, "noreply"),
+		From:     getEnv(constants.SMTP_FROM, "noreply@yourapp.com"),
+		Password: getEnv(constants.SMTP_PASSWORD, ""),
+	})
+
+	brokers := strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ",")
+
 	logger.Info().Msg("loading service configuration end")
 
 	return &Config{
 		IsDevelopment: isDev,
 		Port:          port,
 		RedisConfig:   redisConfig,
+		KafkaBrokers:  brokers,
 	}
 }
 

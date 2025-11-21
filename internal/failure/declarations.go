@@ -36,4 +36,5 @@ var (
 	ErrTokenExpired     = errors.New("token has expired")
 	ErrTokenRevoked     = errors.New("token has been revoked")
 	ErrTokenGeneration  = errors.New("failed to generate token")
+	ErrTokenVerification  = errors.New("failed to verify token")
 )

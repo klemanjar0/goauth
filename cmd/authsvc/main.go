@@ -10,8 +10,10 @@ import (
 
 	"goauth/internal/config"
 	"goauth/internal/failure"
+	"goauth/internal/kafka"
 	"goauth/internal/logger"
 	"goauth/internal/server"
+	"goauth/internal/service"
 	"goauth/internal/store"
 	"goauth/internal/store/pg/repository"
 )
@@ -27,7 +29,43 @@ func main() {
 	defer redisClient.Close()
 
 	queries := repository.New(db)
-	s := server.New(db, queries, cfg, redisClient)
+
+	brokers := cfg.KafkaBrokers
+	producer := kafka.NewProducer(kafka.ProducerConfig{
+		Brokers: brokers,
+		Topic:   service.EmailTopic,
+	})
+	defer producer.Close()
+
+	emailService := service.NewEmailService(producer)
+
+	kafkaServices := &server.KafkaServices{
+		EmailService: emailService,
+	}
+
+	s := server.New(db, queries, cfg, redisClient, kafkaServices)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	numConsumers := 3
+	for i := range numConsumers {
+		consumer := kafka.NewConsumer(kafka.ConsumerConfig{
+			Brokers: brokers,
+			Topic:   service.EmailTopic,
+			GroupID: "email-workers",
+			Handler: service.HandleEmailMessage,
+		})
+
+		go func(c *kafka.Consumer, id int) {
+			if err := c.Start(ctx); err != nil {
+				logger.Error().
+					Err(err).
+					Int("consumer_id", id).
+					Msg("consumer stopped with error")
+			}
+		}(consumer, i)
+	}
 
 	go func() {
 		logger.Info().Str("addr", s.ServerInstance.Addr).Msg("starting server")
@@ -40,12 +78,16 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
+	cancel()
+
+	time.Sleep(5 * time.Second)
+
 	logger.Info().Msg("shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
 
-	if err := s.ServerInstance.Shutdown(ctx); err != nil {
+	if err := s.ServerInstance.Shutdown(shutdownCtx); err != nil {
 		logger.Fatal().Err(err).Msg(failure.ErrForcedShutdownServer.Error())
 	}
 

@@ -14,15 +14,20 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 )
 
+type KafkaServices struct {
+	EmailService *service.EmailService
+}
+
 type Server struct {
 	DB             *sql.DB
 	Queries        *repository.Queries
 	App            *chi.Mux
 	ServerInstance *http.Server
 	Redis          *store.RedisClient
+	KafkaServices  *KafkaServices
 }
 
-func New(db *sql.DB, q *repository.Queries, c *config.Config, redis *store.RedisClient) *Server {
+func New(db *sql.DB, q *repository.Queries, c *config.Config, redis *store.RedisClient, kServices *KafkaServices) *Server {
 	r := chi.NewRouter()
 
 	server := &http.Server{
@@ -36,6 +41,7 @@ func New(db *sql.DB, q *repository.Queries, c *config.Config, redis *store.Redis
 		Queries:        q,
 		ServerInstance: server,
 		Redis:          redis,
+		KafkaServices:  kServices,
 	}
 
 	s.setupRoutes()
@@ -44,7 +50,7 @@ func New(db *sql.DB, q *repository.Queries, c *config.Config, redis *store.Redis
 }
 
 func (s *Server) setupRoutes() {
-	service := service.NewUserService(s.DB, s.Redis.Client)
+	service := service.NewUserService(s.DB, s.Redis.Client, s.KafkaServices.EmailService)
 	handler := handler.NewUserHandler(service)
 
 	s.App.Use(chimiddleware.RequestID)
@@ -59,6 +65,7 @@ func (s *Server) setupRoutes() {
 		r.Get("/health", handler.HealthCheck)
 	})
 
+	s.App.Get("/verify-email", handler.VerifyEmail)
 	s.App.NotFound(handler.NotFound)
 	s.App.MethodNotAllowed(handler.MethodNotAllowed)
 }

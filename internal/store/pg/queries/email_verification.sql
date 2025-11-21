@@ -8,6 +8,12 @@ from email_verification_tokens
 where id = $1
     and used_at is null
     and expires_at > now();
+-- name: GetEmailVerificationTokenByHash :one
+select *
+from email_verification_tokens
+where token_hash = $1
+    and used_at is null
+    and expires_at > now();
 -- name: MarkEmailVerificationTokenUsed :exec
 update email_verification_tokens
 set used_at = now()

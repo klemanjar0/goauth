@@ -26,10 +26,11 @@ const (
 )
 
 type UserService struct {
-	queries *repository.Queries
-	redis   *redis.Client
-	hasher  *auth.PasswordHasher
-	db      *sql.DB
+	queries      *repository.Queries
+	redis        *redis.Client
+	hasher       *auth.PasswordHasher
+	db           *sql.DB
+	emailService *EmailService
 }
 
 type RefreshTokenRequest struct {
@@ -89,12 +90,13 @@ type VerifyTokenResponse struct {
 	ExpiresAt   time.Time
 }
 
-func NewUserService(db *sql.DB, redisClient *redis.Client) *UserService {
+func NewUserService(db *sql.DB, redisClient *redis.Client, emailService *EmailService) *UserService {
 	return &UserService{
-		queries: repository.New(db),
-		redis:   redisClient,
-		hasher:  auth.NewPasswordHasher(),
-		db:      db,
+		queries:      repository.New(db),
+		redis:        redisClient,
+		hasher:       auth.NewPasswordHasher(),
+		db:           db,
+		emailService: emailService,
 	}
 }
 
@@ -646,4 +648,85 @@ func (s *UserService) createAuditLog(ctx context.Context, userID uuid.UUID, even
 
 	_, err := s.queries.CreateAuditLog(ctx, params)
 	return err
+}
+
+func (s *UserService) SendVerificationEmail(ctx context.Context, user *RegisterUserResponse) error {
+	token := uuid.New().String()
+	params := repository.CreateEmailVerificationTokenParams{
+		UserID:    uuid.NullUUID{UUID: user.UserID, Valid: true},
+		TokenHash: token,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+
+	_, err := s.queries.CreateEmailVerificationToken(ctx, params)
+	if err != nil {
+		logger.Error().
+			Str("email", user.Email).
+			Err(err).
+			Msg("failed to create email verification token")
+		return err
+	}
+
+	if err := s.emailService.EnqueueVerificationEmail(ctx, user.Email, token); err != nil {
+		logger.Error().
+			Err(err).
+			Str("email", user.Email).
+			Msg("failed to enqueue verification email")
+		return err
+	}
+
+	logger.Info().
+		Str("email", user.Email).
+		Str("user_id", user.UserID.String()).
+		Msg("verification email queued")
+
+	return nil
+}
+
+func (s *UserService) VerifyEmail(ctx context.Context, token string) error {
+	if token == "" {
+		return failure.ErrInvalidToken
+	}
+
+	verificationToken, err := s.queries.GetEmailVerificationTokenByHash(ctx, token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			logger.Warn().
+				Str("token", token).
+				Msg("email verification token not found or expired")
+			return failure.ErrInvalidToken
+		}
+		logger.Error().
+			Err(err).
+			Msg("database error while fetching email verification token")
+		return failure.ErrDatabaseError
+	}
+
+	if err := s.queries.MarkEmailVerificationTokenUsed(ctx, verificationToken.ID); err != nil {
+		logger.Error().
+			Err(err).
+			Str("token_id", verificationToken.ID.String()).
+			Msg("failed to mark email verification token as used")
+		return failure.ErrDatabaseError
+	}
+
+	_, err = s.queries.UpdateUser(ctx, repository.UpdateUserParams{
+		ID:             verificationToken.UserID.UUID,
+		EmailConfirmed: sql.NullBool{Bool: true, Valid: true},
+	})
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Str("user_id", verificationToken.UserID.UUID.String()).
+			Msg("failed to update user email_confirmed status")
+		return failure.ErrDatabaseError
+	}
+
+	s.InvalidateUserCache(ctx, verificationToken.UserID.UUID)
+
+	logger.Info().
+		Str("user_id", verificationToken.UserID.UUID.String()).
+		Msg("email verified successfully")
+
+	return nil
 }

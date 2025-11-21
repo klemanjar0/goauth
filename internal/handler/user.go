@@ -105,6 +105,8 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	u.userService.SendVerificationEmail(ctx, result)
+
 	response := map[string]interface{}{
 		"success": true,
 		"data": map[string]interface{}{
@@ -439,4 +441,29 @@ func (h *UserHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	internal.Respond(w).OK(health)
+}
+
+func (h *UserHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+
+	if token == "" {
+		internal.
+			Respond(w).
+			Status(http.StatusBadRequest).
+			Message(failure.ErrInvalidToken.Error()).
+			Send()
+		return
+	}
+
+	if err := h.userService.VerifyEmail(r.Context(), token); err != nil {
+		logger.Error().
+			Err(err).
+			Str("token", token).
+			Msg("failed to verify")
+
+		internal.Respond(w).Status(http.StatusBadRequest).Text("Failed to verify email. Try again later.").SendText()
+		return
+	}
+
+	internal.Respond(w).Status(http.StatusAccepted).Text("Email has been successfully verified").SendText()
 }
