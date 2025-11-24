@@ -8,6 +8,7 @@ import (
 	"goauth/internal/service"
 	"goauth/internal/store"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -50,9 +51,22 @@ func (s *Server) setupRoutes() {
 	service := service.NewUserService(s.Store, s.Redis.Client, s.KafkaServices.EmailService)
 	handler := handler.NewUserHandler(service)
 
+	globalRateLimiter := middleware.NewRateLimiter(s.Redis.Client, middleware.RateLimiterConfig{
+		RequestsPerWindow: 100,
+		WindowDuration:    time.Minute,
+		KeyPrefix:         "ratelimit:global",
+	})
+
+	authRateLimiter := middleware.NewRateLimiter(s.Redis.Client, middleware.RateLimiterConfig{
+		RequestsPerWindow: 5,
+		WindowDuration:    time.Minute,
+		KeyPrefix:         "ratelimit:auth",
+	})
+
 	s.App.Use(chimiddleware.RequestID)
 	s.App.Use(middleware.RequestLogger)
 	s.App.Use(middleware.Recoverer)
+	s.App.Use(globalRateLimiter.Middleware)
 
 	s.App.Route("/v1", func(r chi.Router) {
 		r.Post("/register", handler.Register)
@@ -61,7 +75,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/verify", handler.VerifyToken)
 		r.Get("/health", handler.HealthCheck)
 
-		r.Post("/reset-password", handler.RequestPasswordReset)
+		r.With(authRateLimiter.Middleware).Post("/reset-password", handler.RequestPasswordReset)
 		r.Post("/password-update", handler.PasswordReset)
 	})
 

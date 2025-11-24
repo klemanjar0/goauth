@@ -500,13 +500,24 @@ func (h *UserHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.userService.SendPasswordResetEmail(r.Context(), req.Email); err != nil {
-		logger.Error().
-			Err(err).
-			Str("email", req.Email).
-			Msg("failed to send email")
-
-		internal.Respond(w).Status(http.StatusBadRequest).Text("Failed to send email. Try again later.").SendText()
+	ctx := r.Context()
+	if err := h.userService.SendPasswordResetEmail(ctx, req.Email); err != nil {
+		switch {
+		case errors.Is(err, failure.ErrDatabaseError):
+			logger.Error().Err(err).Str("email", req.Email).Msg("database error during password reset request")
+			internal.
+				Respond(w).
+				Status(http.StatusInternalServerError).
+				Error(err).Message(failure.ErrServer.Error()).
+				Send()
+		default:
+			logger.Error().Err(err).Str("email", req.Email).Msg("unexpected error during password reset request")
+			internal.
+				Respond(w).
+				Status(http.StatusInternalServerError).
+				Error(err).Message(failure.ErrServer.Error()).
+				Send()
+		}
 		return
 	}
 
@@ -531,40 +542,72 @@ func (h *UserHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	if req.Token == "" {
+		internal.
+			Respond(w).
+			Status(http.StatusBadRequest).
+			Message("token is required").
+			Send()
+		return
+	}
+
+	if req.NewPassword == "" {
+		internal.
+			Respond(w).
+			Status(http.StatusBadRequest).
+			Message("new_password is required").
+			Send()
+		return
+	}
+
 	clientIP := utility.GetClientIP(r)
 	userAgent := r.UserAgent()
+	ctx := r.Context()
 
-	if err := h.userService.ResetPassword(r.Context(), service.ResetPasswordPayload{
+	if err := h.userService.ResetPassword(ctx, service.ResetPasswordPayload{
 		Token:       req.Token,
 		NewPassword: req.NewPassword,
 		IP:          clientIP,
 		UserAgent:   userAgent,
 	}); err != nil {
-		logger.Error().
-			Err(err).
-			Msg("failed to reset password")
-
 		switch {
 		case errors.Is(err, failure.ErrTokenInvalid):
+			logger.Warn().Err(err).Msg("invalid or expired password reset token")
 			internal.
 				Respond(w).
 				Status(http.StatusBadRequest).
 				Error(err).Message(failure.ErrTokenInvalid.Error()).
 				Send()
-		case errors.Is(err, failure.ErrPasswordHashError):
+		case errors.Is(err, failure.ErrPasswordTooWeak):
+			logger.Warn().Err(err).Msg("weak password during password reset")
 			internal.
 				Respond(w).
 				Status(http.StatusBadRequest).
-				Error(err).Message(failure.ErrPasswordHashError.Error()).
+				Error(err).Message(failure.ErrPasswordTooWeak.Error()).
+				Send()
+		case errors.Is(err, failure.ErrPasswordHashError):
+			logger.Error().Err(err).Msg("password hashing error during password reset")
+			internal.
+				Respond(w).
+				Status(http.StatusInternalServerError).
+				Error(err).Message(failure.ErrServer.Error()).
+				Send()
+		case errors.Is(err, failure.ErrDatabaseError):
+			logger.Error().Err(err).Msg("database error during password reset")
+			internal.
+				Respond(w).
+				Status(http.StatusInternalServerError).
+				Error(err).Message(failure.ErrServer.Error()).
 				Send()
 		case errors.Is(err, failure.ErrPasswordReset):
+			logger.Error().Err(err).Msg("password reset transaction failed")
 			internal.
 				Respond(w).
-				Status(http.StatusBadRequest).
-				Error(err).Message(failure.ErrPasswordReset.Error()).
+				Status(http.StatusInternalServerError).
+				Error(err).Message(failure.ErrServer.Error()).
 				Send()
 		default:
-			logger.Error().Err(err).Msg("unexpected error")
+			logger.Error().Err(err).Msg("unexpected error during password reset")
 			internal.
 				Respond(w).
 				Status(http.StatusInternalServerError).
