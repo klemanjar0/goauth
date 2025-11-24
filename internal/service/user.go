@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"goauth/internal/failure"
+	"goauth/internal/store"
 	"goauth/internal/utility"
 
 	"github.com/google/uuid"
@@ -26,10 +27,9 @@ const (
 )
 
 type UserService struct {
-	queries      *repository.Queries
+	store        *store.Store
 	redis        *redis.Client
 	hasher       *auth.PasswordHasher
-	db           *sql.DB
 	emailService *EmailService
 }
 
@@ -90,12 +90,18 @@ type VerifyTokenResponse struct {
 	ExpiresAt   time.Time
 }
 
-func NewUserService(db *sql.DB, redisClient *redis.Client, emailService *EmailService) *UserService {
+type ResetPasswordPayload struct {
+	Token       string
+	NewPassword string
+	IP          string
+	UserAgent   string
+}
+
+func NewUserService(store *store.Store, redisClient *redis.Client, emailService *EmailService) *UserService {
 	return &UserService{
-		queries:      repository.New(db),
+		store:        store,
 		redis:        redisClient,
 		hasher:       auth.NewPasswordHasher(),
-		db:           db,
 		emailService: emailService,
 	}
 }
@@ -119,7 +125,7 @@ func (s *UserService) RegisterUser(ctx context.Context, req RegisterUserRequest)
 		return nil, err
 	}
 
-	existingUser, err := s.queries.GetUserByEmail(ctx, email)
+	existingUser, err := s.store.Queries.GetUserByEmail(ctx, email)
 	if err == nil && existingUser.ID != uuid.Nil {
 		logger.Warn().
 			Str("email", email).
@@ -154,7 +160,7 @@ func (s *UserService) RegisterUser(ctx context.Context, req RegisterUserRequest)
 		permissions = defaultPermissions
 	}
 
-	user, err := s.queries.CreateUser(ctx, repository.CreateUserParams{
+	user, err := s.store.Queries.CreateUser(ctx, repository.CreateUserParams{
 		Email:        email,
 		PasswordHash: passwordHash,
 		Permissions:  permissions,
@@ -194,7 +200,7 @@ func (s *UserService) RegisterUser(ctx context.Context, req RegisterUserRequest)
 }
 
 func (s *UserService) GetUserByID(ctx context.Context, userID uuid.UUID) (*repository.User, error) {
-	user, err := s.queries.GetUserByID(ctx, userID)
+	user, err := s.store.Queries.GetUserByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, failure.ErrUserNotFound
@@ -256,7 +262,7 @@ func (s *UserService) InvalidateUserCache(ctx context.Context, userID uuid.UUID)
 func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*repository.User, error) {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 
-	user, err := s.queries.GetUserByEmail(ctx, normalizedEmail)
+	user, err := s.store.Queries.GetUserByEmail(ctx, normalizedEmail)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, failure.ErrUserNotFound
@@ -315,7 +321,7 @@ func (s *UserService) LoginUser(ctx context.Context, req LoginRequest) (*LoginRe
 	}
 
 	refreshTokenExpiry := time.Now().Add(7 * 24 * time.Hour) // 7 days
-	dbToken, err := s.queries.CreateRefreshToken(ctx, repository.CreateRefreshTokenParams{
+	dbToken, err := s.store.Queries.CreateRefreshToken(ctx, repository.CreateRefreshTokenParams{
 		UserID:      uuid.NullUUID{UUID: user.ID, Valid: true},
 		DeviceInfo:  sql.NullString{String: req.DeviceInfo, Valid: req.DeviceInfo != ""},
 		ExpiresAt:   refreshTokenExpiry,
@@ -438,7 +444,7 @@ func (s *UserService) RefreshAccessToken(ctx context.Context, req RefreshTokenRe
 		return nil, failure.ErrInvalidToken
 	}
 
-	dbToken, err := s.queries.GetRefreshToken(ctx, refreshTokenID)
+	dbToken, err := s.store.Queries.GetRefreshToken(ctx, refreshTokenID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			logger.Warn().
@@ -453,7 +459,7 @@ func (s *UserService) RefreshAccessToken(ctx context.Context, req RefreshTokenRe
 		return nil, failure.ErrDatabaseError
 	}
 
-	user, err := s.GetUserByID(ctx, dbToken.UserID.UUID)
+	user, err := s.GetUserByIDWithCache(ctx, dbToken.UserID.UUID)
 	if err != nil {
 		return nil, err
 	}
@@ -470,14 +476,14 @@ func (s *UserService) RefreshAccessToken(ctx context.Context, req RefreshTokenRe
 			Str("user_id", user.ID.String()).
 			Msg("refresh token reuse detected - revoking token family")
 
-		err = s.queries.RevokeTokenFamily(ctx, refreshTokenID)
+		err = s.store.Queries.RevokeTokenFamily(ctx, refreshTokenID)
 		if err != nil {
 			logger.Error().Err(err).Msg("failed to revoke token family")
 		}
 		return nil, failure.ErrTokenRevoked
 	}
 
-	err = s.queries.UpdateRefreshTokenLastUsed(ctx, refreshTokenID)
+	err = s.store.Queries.UpdateRefreshTokenLastUsed(ctx, refreshTokenID)
 	if err != nil {
 		logger.Error().
 			Err(err).
@@ -495,7 +501,7 @@ func (s *UserService) RefreshAccessToken(ctx context.Context, req RefreshTokenRe
 	}
 
 	refreshTokenExpiry := time.Now().Add(7 * 24 * time.Hour) // 7 days
-	newDBToken, err := s.queries.CreateRefreshToken(ctx, repository.CreateRefreshTokenParams{
+	newDBToken, err := s.store.Queries.CreateRefreshToken(ctx, repository.CreateRefreshTokenParams{
 		UserID:      uuid.NullUUID{UUID: user.ID, Valid: true},
 		DeviceInfo:  sql.NullString{String: req.DeviceInfo, Valid: req.DeviceInfo != ""},
 		ExpiresAt:   refreshTokenExpiry,
@@ -593,7 +599,7 @@ func (s *UserService) LogoutUser(ctx context.Context, accessToken string, userID
 
 // todo: use for password reset
 func (s *UserService) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID, reason string) error {
-	err := s.queries.RevokeAllUserTokens(ctx, uuid.NullUUID{UUID: userID, Valid: true})
+	err := s.store.Queries.RevokeAllUserTokens(ctx, uuid.NullUUID{UUID: userID, Valid: true})
 	if err != nil {
 		logger.Error().
 			Err(err).
@@ -646,7 +652,7 @@ func (s *UserService) createAuditLog(ctx context.Context, userID uuid.UUID, even
 		}
 	}
 
-	_, err := s.queries.CreateAuditLog(ctx, params)
+	_, err := s.store.Queries.CreateAuditLog(ctx, params)
 	return err
 }
 
@@ -658,7 +664,7 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, user *RegisterU
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 	}
 
-	_, err := s.queries.CreateEmailVerificationToken(ctx, params)
+	_, err := s.store.Queries.CreateEmailVerificationToken(ctx, params)
 	if err != nil {
 		logger.Error().
 			Str("email", user.Email).
@@ -683,12 +689,159 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, user *RegisterU
 	return nil
 }
 
+func (s *UserService) SendPasswordResetEmail(ctx context.Context, email string) error {
+	var user *repository.User
+	var err error
+	user, err = s.GetUserByEmail(ctx, email)
+
+	if err != nil || user == nil {
+		logger.Warn().Str("email", email).Msg("password reset requested for non-existent email")
+		return nil
+	}
+
+	if !user.IsActive.Bool {
+		logger.Warn().Msg("user inactive")
+		return nil
+	}
+
+	token := uuid.New().String()
+	params := repository.CreatePasswordResetTokenParams{
+		UserID:    uuid.NullUUID{UUID: user.ID, Valid: true},
+		TokenHash: auth.HashToken256(token),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+
+	_, err = s.store.Queries.CreatePasswordResetToken(ctx, params)
+
+	if err != nil {
+		logger.Error().
+			Str("email", user.Email).
+			Err(err).
+			Msg("failed to create password reset token on db")
+		return err
+	}
+
+	if err := s.emailService.EnqueuePasswordResetEmail(ctx, user.Email, token); err != nil {
+		logger.Error().
+			Err(err).
+			Str("email", user.Email).
+			Msg("failed to enqueue password reset email")
+		return err
+	}
+
+	logger.Info().
+		Str("email", user.Email).
+		Msg("password reset email queued")
+
+	return nil
+}
+
+func (s *UserService) ResetPassword(ctx context.Context, payload ResetPasswordPayload) error {
+	var user *repository.User
+	var err error
+
+	tokenHash := auth.HashToken256(payload.Token)
+
+	var token repository.PasswordResetToken
+	token, err = s.store.Queries.GetPasswordResetTokenByHash(ctx, tokenHash)
+
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Msg("token is not found")
+		return failure.ErrTokenInvalid
+	}
+
+	user, err = s.GetUserByIDWithCache(ctx, token.UserID.UUID)
+
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Str("uuid", token.UserID.UUID.String()).
+			Msg("failed to get user data with token")
+		return failure.ErrDatabaseError
+	}
+
+	if err := utility.ValidatePassword(payload.NewPassword); err != nil {
+		logger.Warn().
+			Str("email", user.Email).
+			Err(err).
+			Msg("weak password during registration")
+		return failure.ErrPasswordTooWeak
+	}
+
+	passwordHash, err := s.hasher.HashPassword(payload.NewPassword)
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Str("email", user.Email).
+			Msg("failed to hash password")
+		return failure.ErrPasswordHashError
+	}
+
+	err = s.store.ExecTx(ctx, func(*repository.Queries) error {
+		_, updateErr := s.
+			store.
+			Queries.
+			UpdateUserPassword(ctx, repository.UpdateUserPasswordParams{
+				ID:           user.ID,
+				PasswordHash: passwordHash,
+			})
+
+		if updateErr != nil {
+			logger.Error().
+				Err(updateErr).
+				Msg("failed to update password")
+			return updateErr
+		}
+
+		invErr := s.store.Queries.MarkPasswordResetTokenUsed(ctx, token.ID)
+
+		if invErr != nil {
+			logger.Error().
+				Err(invErr).
+				Msg("failed to invalidate token")
+
+			return invErr
+		}
+
+		if err := s.RevokeAllUserTokens(ctx, user.ID, "password reset"); err != nil {
+			return err
+		}
+
+		s.InvalidateUserCache(ctx, user.ID)
+
+		return nil
+	})
+
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Str("email", user.Email).
+			Msg("password change transaction failed")
+		return failure.ErrPasswordReset
+	}
+
+	// move to transaction?
+	err = s.createAuditLog(ctx, user.ID, "user_password_reset", payload.IP, payload.UserAgent, map[string]any{
+		"reason": "user_initiated",
+	})
+
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Msg("createAuditLog failed")
+	}
+
+	return nil
+}
+
 func (s *UserService) VerifyEmail(ctx context.Context, token string) error {
 	if token == "" {
 		return failure.ErrInvalidToken
 	}
 
-	verificationToken, err := s.queries.GetEmailVerificationTokenByHash(ctx, token)
+	verificationToken, err := s.store.Queries.GetEmailVerificationTokenByHash(ctx, token)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			logger.Warn().
@@ -702,7 +855,7 @@ func (s *UserService) VerifyEmail(ctx context.Context, token string) error {
 		return failure.ErrDatabaseError
 	}
 
-	if err := s.queries.MarkEmailVerificationTokenUsed(ctx, verificationToken.ID); err != nil {
+	if err := s.store.Queries.MarkEmailVerificationTokenUsed(ctx, verificationToken.ID); err != nil {
 		logger.Error().
 			Err(err).
 			Str("token_id", verificationToken.ID.String()).
@@ -710,7 +863,7 @@ func (s *UserService) VerifyEmail(ctx context.Context, token string) error {
 		return failure.ErrDatabaseError
 	}
 
-	_, err = s.queries.UpdateUser(ctx, repository.UpdateUserParams{
+	_, err = s.store.Queries.UpdateUser(ctx, repository.UpdateUserParams{
 		ID:             verificationToken.UserID.UUID,
 		EmailConfirmed: sql.NullBool{Bool: true, Valid: true},
 	})

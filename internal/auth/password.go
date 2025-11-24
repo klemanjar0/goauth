@@ -26,7 +26,7 @@ var (
 	ErrPasswordEmpty       = errors.New("password cannot be empty")
 )
 
-const maxPasswordLength = 172 // Common reasonable limit
+const maxPasswordLength = 72 // Common reasonable limit
 
 type PasswordHasher struct {
 	time    uint32

@@ -70,6 +70,28 @@ func (q *Queries) GetPasswordResetToken(ctx context.Context, id uuid.UUID) (Pass
 	return i, err
 }
 
+const getPasswordResetTokenByHash = `-- name: GetPasswordResetTokenByHash :one
+select id, user_id, token_hash, expires_at, used_at, created_at
+from password_reset_tokens
+where token_hash = $1
+    and used_at is null
+    and expires_at > now()
+`
+
+func (q *Queries) GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error) {
+	row := q.db.QueryRowContext(ctx, getPasswordResetTokenByHash, tokenHash)
+	var i PasswordResetToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const markPasswordResetTokenUsed = `-- name: MarkPasswordResetTokenUsed :exec
 update password_reset_tokens
 set used_at = now()

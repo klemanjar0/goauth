@@ -8,6 +8,12 @@ from password_reset_tokens
 where id = $1
     and used_at is null
     and expires_at > now();
+-- name: GetPasswordResetTokenByHash :one
+select *
+from password_reset_tokens
+where token_hash = $1
+    and used_at is null
+    and expires_at > now();
 -- name: MarkPasswordResetTokenUsed :exec
 update password_reset_tokens
 set used_at = now()

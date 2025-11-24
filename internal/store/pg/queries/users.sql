@@ -24,3 +24,9 @@ update users
 set permissions = $2
 where id = $1
 returning *;
+-- name: UpdateUserPassword :one
+update users
+set password_hash = $2,
+    updated_at = now()
+where id = $1
+returning *;

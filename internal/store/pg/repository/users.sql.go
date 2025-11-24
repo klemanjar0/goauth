@@ -127,6 +127,35 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 	return i, err
 }
 
+const updateUserPassword = `-- name: UpdateUserPassword :one
+update users
+set password_hash = $2,
+    updated_at = now()
+where id = $1
+returning id, email, password_hash, permissions, is_active, email_confirmed, created_at, updated_at
+`
+
+type UpdateUserPasswordParams struct {
+	ID           uuid.UUID
+	PasswordHash string
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Permissions,
+		&i.IsActive,
+		&i.EmailConfirmed,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateUserPermissions = `-- name: UpdateUserPermissions :one
 update users
 set permissions = $2

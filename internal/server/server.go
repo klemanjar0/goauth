@@ -7,7 +7,6 @@ import (
 	"goauth/internal/middleware"
 	"goauth/internal/service"
 	"goauth/internal/store"
-	"goauth/internal/store/pg/repository"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -19,15 +18,14 @@ type KafkaServices struct {
 }
 
 type Server struct {
-	DB             *sql.DB
-	Queries        *repository.Queries
+	Store          *store.Store
 	App            *chi.Mux
 	ServerInstance *http.Server
 	Redis          *store.RedisClient
 	KafkaServices  *KafkaServices
 }
 
-func New(db *sql.DB, q *repository.Queries, c *config.Config, redis *store.RedisClient, kServices *KafkaServices) *Server {
+func New(db *sql.DB, c *config.Config, redis *store.RedisClient, kServices *KafkaServices) *Server {
 	r := chi.NewRouter()
 
 	server := &http.Server{
@@ -37,8 +35,7 @@ func New(db *sql.DB, q *repository.Queries, c *config.Config, redis *store.Redis
 
 	s := &Server{
 		App:            r,
-		DB:             db,
-		Queries:        q,
+		Store:          store.NewStore(db),
 		ServerInstance: server,
 		Redis:          redis,
 		KafkaServices:  kServices,
@@ -50,7 +47,7 @@ func New(db *sql.DB, q *repository.Queries, c *config.Config, redis *store.Redis
 }
 
 func (s *Server) setupRoutes() {
-	service := service.NewUserService(s.DB, s.Redis.Client, s.KafkaServices.EmailService)
+	service := service.NewUserService(s.Store, s.Redis.Client, s.KafkaServices.EmailService)
 	handler := handler.NewUserHandler(service)
 
 	s.App.Use(chimiddleware.RequestID)
@@ -63,6 +60,9 @@ func (s *Server) setupRoutes() {
 		r.Post("/refresh", handler.RefreshToken)
 		r.Post("/verify", handler.VerifyToken)
 		r.Get("/health", handler.HealthCheck)
+
+		r.Post("/reset-password", handler.RequestPasswordReset)
+		r.Post("/password-update", handler.PasswordReset)
 	})
 
 	s.App.Get("/verify-email", handler.VerifyEmail)

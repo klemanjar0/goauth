@@ -31,6 +31,15 @@ type VerifyTokenRequest struct {
 	Token string `json:"token"`
 }
 
+type ResetPasswordEmailRequest struct {
+	Email string `json:"email"`
+}
+
+type ResetPasswordRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
+}
+
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
@@ -466,4 +475,108 @@ func (h *UserHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	internal.Respond(w).Status(http.StatusAccepted).Text("Email has been successfully verified").SendText()
+}
+
+func (h *UserHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	var req ResetPasswordEmailRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Warn().
+			Err(err).
+			Str("path", r.URL.Path).
+			Msg("failed to decode password reset email request")
+
+		internal.Respond(w).BadRequest(errors.New("invalid request body"))
+		return
+	}
+	defer r.Body.Close()
+
+	if req.Email == "" {
+		internal.
+			Respond(w).
+			Status(http.StatusBadRequest).
+			Message(failure.ErrInvalidEmail.Error()).
+			Send()
+		return
+	}
+
+	if err := h.userService.SendPasswordResetEmail(r.Context(), req.Email); err != nil {
+		logger.Error().
+			Err(err).
+			Str("email", req.Email).
+			Msg("failed to send email")
+
+		internal.Respond(w).Status(http.StatusBadRequest).Text("Failed to send email. Try again later.").SendText()
+		return
+	}
+
+	response := map[string]any{
+		"message": "reset password mail has been successfully send",
+	}
+
+	internal.Respond(w).OK(response)
+}
+
+func (h *UserHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
+	var req ResetPasswordRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Warn().
+			Err(err).
+			Str("path", r.URL.Path).
+			Msg("failed to decode password reset request")
+
+		internal.Respond(w).BadRequest(errors.New("invalid request body"))
+		return
+	}
+	defer r.Body.Close()
+
+	clientIP := utility.GetClientIP(r)
+	userAgent := r.UserAgent()
+
+	if err := h.userService.ResetPassword(r.Context(), service.ResetPasswordPayload{
+		Token:       req.Token,
+		NewPassword: req.NewPassword,
+		IP:          clientIP,
+		UserAgent:   userAgent,
+	}); err != nil {
+		logger.Error().
+			Err(err).
+			Msg("failed to reset password")
+
+		switch {
+		case errors.Is(err, failure.ErrTokenInvalid):
+			internal.
+				Respond(w).
+				Status(http.StatusBadRequest).
+				Error(err).Message(failure.ErrTokenInvalid.Error()).
+				Send()
+		case errors.Is(err, failure.ErrPasswordHashError):
+			internal.
+				Respond(w).
+				Status(http.StatusBadRequest).
+				Error(err).Message(failure.ErrPasswordHashError.Error()).
+				Send()
+		case errors.Is(err, failure.ErrPasswordReset):
+			internal.
+				Respond(w).
+				Status(http.StatusBadRequest).
+				Error(err).Message(failure.ErrPasswordReset.Error()).
+				Send()
+		default:
+			logger.Error().Err(err).Msg("unexpected error")
+			internal.
+				Respond(w).
+				Status(http.StatusInternalServerError).
+				Error(err).Message(failure.ErrServer.Error()).
+				Send()
+		}
+		return
+	}
+
+	response := map[string]any{
+		"message": "password has been successfully changed",
+	}
+
+	internal.Respond(w).OK(response)
 }

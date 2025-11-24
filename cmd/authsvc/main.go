@@ -15,7 +15,6 @@ import (
 	"goauth/internal/server"
 	"goauth/internal/service"
 	"goauth/internal/store"
-	"goauth/internal/store/pg/repository"
 )
 
 func main() {
@@ -27,8 +26,6 @@ func main() {
 
 	redisClient := store.InitRedisClient(cfg)
 	defer redisClient.Close()
-
-	queries := repository.New(db)
 
 	brokers := cfg.KafkaBrokers
 	producer := kafka.NewProducer(kafka.ProducerConfig{
@@ -43,7 +40,7 @@ func main() {
 		EmailService: emailService,
 	}
 
-	s := server.New(db, queries, cfg, redisClient, kafkaServices)
+	s := server.New(db, cfg, redisClient, kafkaServices)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

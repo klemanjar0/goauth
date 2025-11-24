@@ -28,13 +28,15 @@ var (
 	ErrEmailNotConfirmed  = errors.New("email address not confirmed")
 	ErrDatabaseError      = errors.New("database operation failed")
 	ErrPasswordHashError  = errors.New("failed to hash password")
+	ErrPasswordReset      = errors.New("failed to reset password")
 )
 
 // -- Token Errors Declarations --
 var (
-	ErrInvalidToken     = errors.New("invalid token")
-	ErrTokenExpired     = errors.New("token has expired")
-	ErrTokenRevoked     = errors.New("token has been revoked")
-	ErrTokenGeneration  = errors.New("failed to generate token")
-	ErrTokenVerification  = errors.New("failed to verify token")
+	ErrInvalidToken      = errors.New("invalid token")
+	ErrTokenExpired      = errors.New("token has expired")
+	ErrTokenRevoked      = errors.New("token has been revoked")
+	ErrTokenInvalid      = errors.New("token has been already used or not found")
+	ErrTokenGeneration   = errors.New("failed to generate token")
+	ErrTokenVerification = errors.New("failed to verify token")
 )
