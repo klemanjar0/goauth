@@ -5,12 +5,15 @@ A production-ready authentication service built with Go, featuring JWT-based aut
 ## Stack
 
 - **HTTP Framework**: Chi router
-- **Database**: PostgreSQL
-- **Caching**: Redis
+- **Database**: PostgreSQL 16
+- **Caching**: Redis 7
+- **Message Queue**: Apache Kafka with Zookeeper
 - **Password Hashing**: Argon2id
+- **Token Hashing**: SHA-256
 - **Query Generation**: sqlc
 - **Migrations**: golang-migrate
 - **Logging**: Zerolog
+- **JWT**: golang-jwt/jwt v5
 - **Metrics**: Prometheus (planned)
 
 ## Features
@@ -23,8 +26,9 @@ A production-ready authentication service built with Go, featuring JWT-based aut
 - ✅ User data caching with Redis
 - ✅ Comprehensive audit logging
 - ✅ Device tracking per refresh token
-- 🚧 Password reset flow
-- 🚧 Email verification
+- ✅ Password reset flow with secure token hashing (SHA-256)
+- ✅ Email verification with Kafka integration
+- ✅ Automatic token revocation on password reset
 
 ---
 
@@ -327,6 +331,136 @@ Authorization: Bearer <access_token>
 
 ---
 
+### 7. Request Password Reset
+
+**POST** `/api/password-reset/request`
+
+Request a password reset email with a secure token.
+
+**Request Body**:
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "message": "if the email exists, a password reset link has been sent"
+}
+```
+
+**Security Features**:
+- Returns success even if email doesn't exist (prevents email enumeration)
+- Token is SHA-256 hashed before storage
+- Token expires in 24 hours
+- Rate limiting recommended
+
+**Notes**:
+- Password reset email is queued via Kafka
+- Inactive users won't receive reset emails (but response stays the same)
+
+---
+
+### 8. Reset Password
+
+**POST** `/api/password-reset/confirm`
+
+Reset user password using the token from email.
+
+**Request Body**:
+```json
+{
+  "token": "550e8400-e29b-41d4-a716-446655440000",
+  "new_password": "NewSecurePassword123!"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "message": "password has been reset successfully"
+}
+```
+
+**Validation**:
+- Password must meet security requirements
+- Token must be valid and not expired
+- Token can only be used once
+
+**Security Actions**:
+- All user refresh tokens are revoked
+- User cache is invalidated
+- Audit log is created
+- Password is hashed with Argon2id
+
+**Error Responses**:
+
+*400 Bad Request* - Weak password:
+```json
+{
+  "success": false,
+  "error": {
+    "message": "password too weak"
+  }
+}
+```
+
+*401 Unauthorized* - Invalid/expired token:
+```json
+{
+  "success": false,
+  "error": {
+    "message": "invalid token"
+  }
+}
+```
+
+---
+
+### 9. Verify Email
+
+**POST** `/api/email-verification/verify`
+
+Verify user email using the token from verification email.
+
+**Request Body**:
+```json
+{
+  "token": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "message": "email verified successfully"
+}
+```
+
+**Security Features**:
+- Token can only be used once
+- Token expires in 24 hours
+- User cache is invalidated after verification
+
+**Error Responses**:
+
+*401 Unauthorized* - Invalid/expired token:
+```json
+{
+  "success": false,
+  "error": {
+    "message": "invalid token"
+  }
+}
+```
+
+---
+
 ## Token Architecture
 
 ### Access Tokens (JWT)
@@ -344,17 +478,62 @@ Authorization: Bearer <access_token>
 - **Rotation**: New token issued on every refresh
 - **Revocation**: Database-backed with family chain
 
-### Database Schema (Refresh Tokens)
+### Complete Database Schema
+
 ```sql
+-- Users Table
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    permissions BIGINT NOT NULL DEFAULT 0,
+    is_active BOOL DEFAULT TRUE,
+    email_confirmed BOOL DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Refresh Tokens Table
 CREATE TABLE refresh_tokens (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     device_info TEXT,
     rotated_from UUID REFERENCES refresh_tokens(id),
-    revoked BOOLEAN DEFAULT FALSE,
+    revoked BOOL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
     last_used_at TIMESTAMPTZ
+);
+
+-- Email Verification Tokens Table
+CREATE TABLE email_verification_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Password Reset Tokens Table
+CREATE TABLE password_reset_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Audit Logs Table
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NULL,
+    event_type TEXT NOT NULL,
+    ip INET,
+    ua TEXT,
+    payload JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
@@ -433,15 +612,25 @@ TTL:   5 minutes
 - [x] User data caching
 - [x] Audit logging
 - [x] Device tracking
+- [x] Email verification flow with Kafka
+- [x] Password reset flow with secure tokens
+- [x] Automatic token revocation on password reset
+- [x] SHA-256 token hashing
+- [x] Email enumeration protection
 
-### Planned 🚧
-- [ ] Email verification flow
-- [ ] Password reset flow
-- [ ] Rate limiting
+### In Progress 🚧
+- [ ] Email consumer service (Kafka → SMTP)
+- [ ] Rate limiting middleware
+- [ ] Admin endpoints for user management
+
+### Planned 🔮
 - [ ] OAuth2 providers (Google, GitHub)
 - [ ] Multi-factor authentication (MFA)
 - [ ] Session management dashboard
 - [ ] Prometheus metrics
+- [ ] Grafana dashboards
+- [ ] Account lockout after failed attempts
+- [ ] IP-based security rules
 
 ---
 
@@ -449,34 +638,178 @@ TTL:   5 minutes
 
 ```env
 # Database
-DATABASE_URL=postgres://user:password@localhost:5432/goauth?sslmode=disable
+DATABASE_URL=postgres://postgres:password@localhost:5432/goauth?sslmode=disable
 
 # Redis
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=password
 
+# Kafka
+KAFKA_BROKERS=localhost:9092
+KAFKA_EMAIL_TOPIC=email-notifications
+
 # Server
 PORT=8080
+HOST=0.0.0.0
 
 # JWT Secrets (CHANGE IN PRODUCTION!)
-JWT_ACCESS_SECRET=your-secret-key-min-32-chars
-JWT_REFRESH_SECRET=your-refresh-secret-key-min-32-chars
+JWT_ACCESS_SECRET=your-secret-key-min-32-chars-here-change-this
+JWT_REFRESH_SECRET=your-refresh-secret-key-min-32-chars-here-change-this
+
+# Email (for future SMTP integration)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
 ```
 
 ---
 
 ## Running the Service
 
+### Using Docker Compose (Recommended)
+
 ```bash
-# Start dependencies
+# Start all dependencies (PostgreSQL, Redis, Kafka, Zookeeper)
 docker-compose up -d
 
+# Check service health
+docker-compose ps
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+
+# Stop and remove volumes (clean slate)
+docker-compose down -v
+```
+
+### Database Setup
+
+```bash
 # Run migrations
 make migrate-up
 
-# Start server
+# Rollback last migration
+make migrate-down
+
+# Force migration version (if stuck)
+make migrate-force VERSION=1
+```
+
+### Running the Application
+
+```bash
+# Development mode
 go run cmd/authsvc/main.go
+
+# Build and run
+make build
+./bin/authsvc
+
+# Run with hot reload (if using air)
+air
+```
+
+### Generate SQL Code (sqlc)
+
+```bash
+# Generate Go code from SQL queries
+make sqlc-generate
+
+# Verify SQL queries
+make sqlc-verify
+```
+
+### Quick Start Commands
+
+```bash
+# First time setup
+make setup
+
+# Quick start (assumes dependencies installed)
+make quickstart
+
+# View all available commands
+make help
+```
+
+---
+
+## Service URLs
+
+When running with `docker-compose up -d`:
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| GoAuth API | http://localhost:8080 | Main authentication service |
+| Adminer | http://localhost:8080 | PostgreSQL web UI (use port 8080) |
+| PostgreSQL | localhost:5432 | Database server |
+| Redis | localhost:6379 | Cache server |
+| Kafka | localhost:9092 | Message broker |
+| Kafka UI | http://localhost:8090 | Kafka management UI |
+
+**Adminer Login:**
+- System: `PostgreSQL`
+- Server: `postgres`
+- Username: `postgres`
+- Password: `password`
+- Database: `goauth`
+
+---
+
+## Makefile Commands
+
+The project includes a comprehensive Makefile for common tasks:
+
+### Development
+```bash
+make run              # Run the application
+make build            # Build the application binary
+make clean            # Remove build artifacts
+make test             # Run tests
+make test-coverage    # Run tests with coverage report
+```
+
+### Docker
+```bash
+make docker-up        # Start all Docker services
+make docker-down      # Stop all Docker services
+make docker-logs      # View Docker logs (follow mode)
+make docker-clean     # Stop and remove all volumes
+```
+
+### Database
+```bash
+make migrate-up       # Run all migrations
+make migrate-down     # Rollback last migration
+make migrate-force VERSION=1  # Force migration version
+make migrate-create NAME=add_users  # Create new migration
+make db-reset         # Reset database (down + up)
+```
+
+### Code Generation
+```bash
+make sqlc-generate    # Generate Go code from SQL
+make sqlc-verify      # Verify SQL queries
+```
+
+### Development Tools
+```bash
+make fmt              # Format Go code
+make lint             # Run linter (requires golangci-lint)
+make deps             # Download dependencies
+make mod-tidy         # Tidy go.mod
+```
+
+### Quick Commands
+```bash
+make help             # Show all available commands
+make setup            # Complete development setup
+make quickstart       # Start dependencies + migrations
 ```
 
 ---
