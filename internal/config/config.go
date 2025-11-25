@@ -22,10 +22,11 @@ type RedisConfig struct {
 }
 
 type Config struct {
-	IsDevelopment bool
-	Port          string
-	RedisConfig   RedisConfig
-	KafkaBrokers  []string
+	IsDevelopment        bool
+	RunMigrationsOnStart bool
+	Port                 string
+	RedisConfig          RedisConfig
+	KafkaBrokers         []string
 }
 
 func Load() *Config {
@@ -35,6 +36,9 @@ func Load() *Config {
 	}
 
 	isDev := getEnv(constants.ENV, constants.DEVELOPMENT) == constants.DEVELOPMENT
+
+	// dev purposes only!
+	RunMigrationsOnStart := false
 
 	if isDev {
 		logger.Info().Msg("service is running is development mode")
@@ -73,10 +77,11 @@ func Load() *Config {
 	logger.Info().Msg("loading service configuration end")
 
 	return &Config{
-		IsDevelopment: isDev,
-		Port:          port,
-		RedisConfig:   redisConfig,
-		KafkaBrokers:  brokers,
+		IsDevelopment:        isDev,
+		Port:                 port,
+		RedisConfig:          redisConfig,
+		KafkaBrokers:         brokers,
+		RunMigrationsOnStart: RunMigrationsOnStart,
 	}
 }
 

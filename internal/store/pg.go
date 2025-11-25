@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"goauth/internal/config"
 	"goauth/internal/constants"
 	"goauth/internal/failure"
 	"goauth/internal/logger"
@@ -13,7 +14,7 @@ import (
 	"goauth/internal/store/pg/repository"
 )
 
-func InitializeDB() *sql.DB {
+func InitializeDB(cfg *config.Config) *sql.DB {
 	dbConnString := os.Getenv(constants.DB_CONN)
 
 	if dbConnString == "" {
@@ -27,8 +28,10 @@ func InitializeDB() *sql.DB {
 
 	}
 
-	if err := migrations.RunMigrations(db); err != nil {
-		logger.Fatal().Err(err).Msg(failure.ErrDatabaseMigration.Error())
+	if cfg.RunMigrationsOnStart {
+		if err := migrations.RunMigrations(db); err != nil {
+			logger.Fatal().Err(err).Msg(failure.ErrDatabaseMigration.Error())
+		}
 	}
 
 	return db

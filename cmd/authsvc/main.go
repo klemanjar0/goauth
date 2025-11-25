@@ -21,7 +21,7 @@ func main() {
 	cfg := config.Load()
 	logger.Init(cfg.IsDevelopment)
 	logger.Info().Msg("logger ready for use")
-	db := store.InitializeDB()
+	db := store.InitializeDB(cfg)
 	defer db.Close()
 
 	redisClient := store.InitRedisClient(cfg)
