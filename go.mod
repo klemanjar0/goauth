@@ -11,13 +11,16 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.15.11 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/pierrec/lz4/v4 v4.1.16 // indirect
 	github.com/redis/go-redis/v9 v9.16.0 // indirect
 	github.com/sqlc-dev/pqtype v0.3.0 // indirect
+	github.com/zeebo/xxh3 v1.0.2 // indirect
 	golang.org/x/crypto v0.44.0 // indirect
 )
 
 require (
+	github.com/go-chi/httprate v0.15.0
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect

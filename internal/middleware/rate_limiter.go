@@ -13,6 +13,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// unused
+
 type RateLimiterConfig struct {
 	RequestsPerWindow int
 	WindowDuration    time.Duration
