@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package auth.v1;
+
+option go_package = "goauth/pkg/authpb/v1;authpb";
+
+import "google/protobuf/timestamp.proto";
+
+service AuthService {
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  
+  rpc GetUserFromToken(GetUserFromTokenRequest) returns (GetUserFromTokenResponse);
+  
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+  
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  
+  rpc RevokeUserTokens(RevokeUserTokensRequest) returns (RevokeUserTokensResponse);
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string email = 3;
+  int64 permissions = 4;
+}
+
+message GetUserFromTokenRequest {
+  string token = 1;
+}
+
+message GetUserFromTokenResponse {
+  User user = 1;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  int64 permissions = 3;
+  bool is_active = 4;
+  bool email_confirmed = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message CheckPermissionRequest {
+  string token = 1;
+  int64 required_permission = 2;
+}
+
+message CheckPermissionResponse {
+  bool has_permission = 1;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+
+message RevokeUserTokensRequest {
+  string user_id = 1;
+}
+
+message RevokeUserTokensResponse {
+  bool success = 1;
+}

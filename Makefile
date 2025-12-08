@@ -1,4 +1,4 @@
-.PHONY: help build run clean test docker-up docker-down migrate-up migrate-down migrate-force sqlc-generate sqlc-verify
+.PHONY: help build run clean test docker-up docker-down migrate-up migrate-down migrate-force sqlc-generate sqlc-verify proto proto-install
 
 # Default target
 help:
@@ -116,7 +116,7 @@ db-reset:
 	@migrate -path $(MIGRATIONS_PATH) -database "$(DATABASE_URL)" up
 	@echo "Database reset complete"
 
-# Code Generation (sqlc)
+# Code Generation
 sqlc-generate:
 	@echo "Generating Go code from SQL..."
 	@sqlc generate
@@ -126,6 +126,20 @@ sqlc-verify:
 	@echo "Verifying SQL queries..."
 	@sqlc verify
 	@echo "SQL verification complete"
+
+proto:
+	@echo "Generating proto files to pkg/authpb..."
+	@mkdir -p pkg/authpb
+	protoc --go_out=. --go_opt=module=goauth \
+		--go-grpc_out=. --go-grpc_opt=module=goauth \
+		--go_opt=Mapi/proto/auth/v1/auth.proto=goauth/pkg/authpb \
+		--go-grpc_opt=Mapi/proto/auth/v1/auth.proto=goauth/pkg/authpb \
+		api/proto/auth/v1/auth.proto
+	@echo "Proto generation complete"
+
+proto-install:
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 # Development Tools
 fmt:

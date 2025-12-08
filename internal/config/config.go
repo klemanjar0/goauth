@@ -21,12 +21,20 @@ type RedisConfig struct {
 	DB       int
 }
 
+type GRPCConfig struct {
+	Port       string
+	TLSEnabled bool
+	CertFile   string
+	KeyFile    string
+}
+
 type Config struct {
 	IsDevelopment        bool
 	RunMigrationsOnStart bool
 	Port                 string
 	RedisConfig          RedisConfig
 	KafkaBrokers         []string
+	GRPCConfig           GRPCConfig
 }
 
 func Load() *Config {
@@ -47,6 +55,13 @@ func Load() *Config {
 	}
 
 	port := getEnv(constants.PORT, "8080")
+
+	grpcConfig := GRPCConfig{
+		Port:       getEnv(constants.GRPC_PORT, "50051"),
+		TLSEnabled: getEnv(constants.GRPC_TLS_ENABLED, "false") == "true",
+		CertFile:   getEnv(constants.GRPC_CERT_FILE, ""),
+		KeyFile:    getEnv(constants.GRPC_KEY_FILE, ""),
+	}
 
 	logger.Info().Msg("port" + port)
 
@@ -82,6 +97,7 @@ func Load() *Config {
 		RedisConfig:          redisConfig,
 		KafkaBrokers:         brokers,
 		RunMigrationsOnStart: RunMigrationsOnStart,
+		GRPCConfig:           grpcConfig,
 	}
 }
 

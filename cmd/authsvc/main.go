@@ -71,6 +71,12 @@ func main() {
 		}
 	}()
 
+	go func() {
+		if err := s.GrpcInstance.Start(); err != nil {
+			logger.Fatal().Err(err).Msg("grpc server failed")
+		}
+	}()
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -87,6 +93,8 @@ func main() {
 	if err := s.ServerInstance.Shutdown(shutdownCtx); err != nil {
 		logger.Fatal().Err(err).Msg(failure.ErrForcedShutdownServer.Error())
 	}
+
+	s.GrpcInstance.Stop()
 
 	logger.Info().Msg("server stopped gracefully")
 }
