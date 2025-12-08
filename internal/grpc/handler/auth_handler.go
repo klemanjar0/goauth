@@ -31,7 +31,6 @@ func (h *AuthHandler) ValidateToken(ctx context.Context, req *authpb.ValidateTok
 
 	claims, err := h.userService.VerifyAccessToken(ctx, req.Token)
 	if err != nil {
-		// Return proper gRPC error instead of error in response
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
 	}
 
@@ -99,7 +98,6 @@ func (h *AuthHandler) RefreshToken(ctx context.Context, req *authpb.RefreshToken
 		return nil, status.Error(codes.InvalidArgument, "refresh_token is required")
 	}
 
-	// Extract device info from metadata if available
 	deviceInfo := ""
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		if devices := md.Get("device-info"); len(devices) > 0 {
@@ -139,7 +137,6 @@ func (h *AuthHandler) RevokeUserTokens(ctx context.Context, req *authpb.RevokeUs
 
 	err = h.userService.RevokeAllUserTokens(ctx, id, "")
 	if err != nil {
-		// Error will be mapped by errorMappingInterceptor
 		return nil, err
 	}
 
