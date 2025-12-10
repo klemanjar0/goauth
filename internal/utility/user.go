@@ -1,6 +1,7 @@
 package utility
 
 import (
+	"fmt"
 	"goauth/internal/failure"
 	"net/http"
 	"regexp"
@@ -93,4 +94,24 @@ func GetRequestID(r *http.Request) string {
 
 func ParseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)
+}
+
+func GetBearerToken(r *http.Request) (string, error) {
+	auth := r.Header.Get("Authorization")
+
+	if auth == "" {
+		return "", fmt.Errorf("authorization header missing")
+	}
+
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return "", fmt.Errorf("invalid authorization format")
+	}
+
+	token := strings.TrimPrefix(auth, "Bearer ")
+
+	if token == "" {
+		return "", fmt.Errorf("token is empty")
+	}
+
+	return token, nil
 }

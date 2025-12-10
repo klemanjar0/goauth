@@ -35,6 +35,7 @@ type Config struct {
 	RedisConfig          RedisConfig
 	KafkaBrokers         []string
 	GRPCConfig           GRPCConfig
+	AllowedOrigins       []string
 }
 
 func Load() *Config {
@@ -89,6 +90,9 @@ func Load() *Config {
 
 	brokers := strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ",")
 
+	// Parse allowed origins for CORS
+	allowedOrigins := parseAllowedOrigins(getEnv(constants.CORS_ALLOWED_ORIGINS, ""))
+
 	logger.Info().Msg("loading service configuration end")
 
 	return &Config{
@@ -98,7 +102,26 @@ func Load() *Config {
 		KafkaBrokers:         brokers,
 		RunMigrationsOnStart: RunMigrationsOnStart,
 		GRPCConfig:           grpcConfig,
+		AllowedOrigins:       allowedOrigins,
 	}
+}
+
+func parseAllowedOrigins(originsEnv string) []string {
+	if originsEnv == "" {
+		return []string{}
+	}
+
+	origins := strings.Split(originsEnv, ",")
+	result := make([]string, 0, len(origins))
+
+	for _, origin := range origins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+
+	return result
 }
 
 func getEnv(key, defaultValue string) string {

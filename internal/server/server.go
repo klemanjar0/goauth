@@ -99,6 +99,18 @@ func (s *Server) initRoutes() {
 	service := service.NewUserService(s.Store, s.Redis.Client, s.KafkaServices.EmailService)
 	handler := handler.NewUserHandler(service)
 
+	if len(s.Config.AllowedOrigins) > 0 {
+		corsConfig := middleware.CORSConfig{
+			AllowedOrigins:   s.Config.AllowedOrigins,
+			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Request-ID"},
+			ExposedHeaders:   []string{"X-Request-ID"},
+			AllowCredentials: true,
+			MaxAge:           300,
+		}
+		s.App.Use(middleware.CORS(corsConfig))
+	}
+
 	s.App.Use(chimiddleware.RequestID)
 	s.App.Use(middleware.RequestLogger)
 	s.App.Use(middleware.Recoverer)
@@ -109,6 +121,7 @@ func (s *Server) initRoutes() {
 		r.Post("/login", handler.Login)
 		r.Post("/refresh", handler.RefreshToken)
 		r.Post("/verify", handler.VerifyToken)
+		r.Post("/me", handler.VerifyHeaderToken)
 		r.Get("/health", handler.HealthCheck)
 
 		r.With(httprate.LimitByIP(5, time.Minute)).Post("/reset-password", handler.RequestPasswordReset)

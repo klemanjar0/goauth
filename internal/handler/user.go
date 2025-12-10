@@ -190,6 +190,26 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	http.SetCookie(w, &http.Cookie{
+		Name:     "access_token",
+		Value:    result.AccessToken,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   int(result.AccessExpiresIn),
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    result.RefreshToken,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   int(result.RefreshExpiresIn),
+	})
+
 	response := map[string]any{
 		"message":            "login successful",
 		"user_id":            result.UserID,
@@ -219,6 +239,65 @@ func (h *UserHandler) MethodNotAllowed(w http.ResponseWriter, r *http.Request) {
 		Error(errors.New("method not allowed")).
 		Header("Allow", "GET, POST, PUT, DELETE").
 		Send()
+}
+
+func (h *UserHandler) VerifyHeaderToken(w http.ResponseWriter, r *http.Request) {
+	token, err := utility.GetBearerToken(r)
+
+	if err != nil {
+		internal.Respond(w).BadRequest(errors.New("token is required"))
+		return
+	}
+
+	ctx := r.Context()
+	result, verifyErr := h.userService.VerifyAccessToken(ctx, token)
+
+	if verifyErr != nil {
+		switch {
+		case errors.Is(err, failure.ErrTokenExpired):
+			internal.
+				Respond(w).
+				Status(http.StatusUnauthorized).
+				Error(err).Message(failure.ErrTokenExpired.Error()).
+				Send()
+		case errors.Is(err, failure.ErrInvalidToken):
+			internal.
+				Respond(w).
+				Status(http.StatusUnauthorized).
+				Error(err).Message(failure.ErrInvalidToken.Error()).
+				Send()
+		case errors.Is(err, failure.ErrTokenRevoked):
+			internal.
+				Respond(w).
+				Status(http.StatusUnauthorized).
+				Error(err).Message(failure.ErrTokenRevoked.Error()).
+				Send()
+		case errors.Is(err, failure.ErrUserInactive):
+			internal.
+				Respond(w).
+				Status(http.StatusForbidden).
+				Error(err).Message(failure.ErrUserInactive.Error()).
+				Send()
+		default:
+			logger.Error().Err(err).Msg("unexpected error during token verification")
+			internal.
+				Respond(w).
+				Status(http.StatusInternalServerError).
+				Error(err).Message(failure.ErrServer.Error()).
+				Send()
+		}
+		return
+	}
+
+	response := map[string]any{
+		"valid":       result.Valid,
+		"user_id":     result.UserID,
+		"email":       result.Email,
+		"permissions": result.Permissions,
+		"expires_at":  result.ExpiresAt,
+	}
+
+	internal.Respond(w).OK(response)
 }
 
 func (h *UserHandler) VerifyToken(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +445,26 @@ func (h *UserHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	http.SetCookie(w, &http.Cookie{
+		Name:     "access_token",
+		Value:    result.AccessToken,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   int(result.AccessExpiresIn),
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    result.RefreshToken,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   int(result.RefreshExpiresIn),
+	})
+
 	response := map[string]any{
 		"access_token":       result.AccessToken,
 		"refresh_token":      result.RefreshToken,
@@ -434,6 +533,26 @@ func (h *UserHandler) Logout(w http.ResponseWriter, r *http.Request) {
 			Send()
 		return
 	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "access_token",
+		Value:    "",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+		MaxAge:   -1,
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/refresh",
+		MaxAge:   -1,
+	})
 
 	response := map[string]any{
 		"message": "logged out successfully",
