@@ -120,12 +120,18 @@ func (s *Server) initRoutes() {
 		r.Post("/register", handler.Register)
 		r.Post("/login", handler.Login)
 		r.Post("/refresh", handler.RefreshToken)
-		r.Post("/verify", handler.VerifyToken)
-		r.Post("/me", handler.VerifyHeaderToken)
+		r.Post("/me", handler.VerifyToken)
 		r.Get("/health", handler.HealthCheck)
+		r.Post("/logout", handler.Logout)
 
 		r.With(httprate.LimitByIP(5, time.Minute)).Post("/reset-password", handler.RequestPasswordReset)
 		r.Post("/password-update", handler.PasswordReset)
+	})
+
+	s.App.Route("/v2", func(r chi.Router) {
+		r.Post("/refresh", handler.RefreshTokenWithCookie)
+		r.Post("/logout", handler.LogoutWithCookie)
+		r.Post("/me", handler.VerifyCookieToken)
 	})
 
 	s.App.Handle("/metrics", promhttp.Handler())

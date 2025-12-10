@@ -39,4 +39,5 @@ var (
 	ErrTokenInvalid      = errors.New("token has been already used or not found")
 	ErrTokenGeneration   = errors.New("failed to generate token")
 	ErrTokenVerification = errors.New("failed to verify token")
+	ErrTokenIsEmpty      = errors.New("token is empty")
 )
