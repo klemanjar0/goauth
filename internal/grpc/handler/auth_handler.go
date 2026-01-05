@@ -7,6 +7,7 @@ import (
 	"goauth/pkg/authpb"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -131,11 +132,12 @@ func (h *AuthHandler) RevokeUserTokens(ctx context.Context, req *authpb.RevokeUs
 	}
 
 	id, err := uuid.Parse(req.UserId)
+	userId := pgtype.UUID{Bytes: [16]byte(id), Valid: true}
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid user_id format")
 	}
 
-	err = h.userService.RevokeAllUserTokens(ctx, id, "")
+	err = h.userService.RevokeAllUserTokens(ctx, userId, "")
 	if err != nil {
 		return nil, err
 	}

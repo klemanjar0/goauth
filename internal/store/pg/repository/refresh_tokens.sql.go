@@ -7,10 +7,8 @@ package repository
 
 import (
 	"context"
-	"database/sql"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const cleanExpiredTokens = `-- name: CleanExpiredTokens :exec
@@ -19,7 +17,7 @@ where expires_at < now()
 `
 
 func (q *Queries) CleanExpiredTokens(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, cleanExpiredTokens)
+	_, err := q.db.Exec(ctx, cleanExpiredTokens)
 	return err
 }
 
@@ -30,14 +28,14 @@ returning id, user_id, device_info, rotated_from, revoked, created_at, expires_a
 `
 
 type CreateRefreshTokenParams struct {
-	UserID      uuid.NullUUID
-	DeviceInfo  sql.NullString
-	ExpiresAt   time.Time
-	RotatedFrom uuid.NullUUID
+	UserID      pgtype.UUID        `json:"user_id"`
+	DeviceInfo  pgtype.Text        `json:"device_info"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	RotatedFrom pgtype.UUID        `json:"rotated_from"`
 }
 
 func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error) {
-	row := q.db.QueryRowContext(ctx, createRefreshToken,
+	row := q.db.QueryRow(ctx, createRefreshToken,
 		arg.UserID,
 		arg.DeviceInfo,
 		arg.ExpiresAt,
@@ -65,8 +63,8 @@ where id = $1
   and expires_at > now()
 `
 
-func (q *Queries) GetRefreshToken(ctx context.Context, id uuid.UUID) (RefreshToken, error) {
-	row := q.db.QueryRowContext(ctx, getRefreshToken, id)
+func (q *Queries) GetRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error) {
+	row := q.db.QueryRow(ctx, getRefreshToken, id)
 	var i RefreshToken
 	err := row.Scan(
 		&i.ID,
@@ -90,13 +88,13 @@ where user_id = $1
 order by created_at desc
 `
 
-func (q *Queries) GetUserActiveTokens(ctx context.Context, userID uuid.NullUUID) ([]RefreshToken, error) {
-	rows, err := q.db.QueryContext(ctx, getUserActiveTokens, userID)
+func (q *Queries) GetUserActiveTokens(ctx context.Context, userID pgtype.UUID) ([]RefreshToken, error) {
+	rows, err := q.db.Query(ctx, getUserActiveTokens, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []RefreshToken
+	items := []RefreshToken{}
 	for rows.Next() {
 		var i RefreshToken
 		if err := rows.Scan(
@@ -113,9 +111,6 @@ func (q *Queries) GetUserActiveTokens(ctx context.Context, userID uuid.NullUUID)
 		}
 		items = append(items, i)
 	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -129,8 +124,8 @@ where user_id = $1
   and revoked = false
 `
 
-func (q *Queries) RevokeAllUserTokens(ctx context.Context, userID uuid.NullUUID) error {
-	_, err := q.db.ExecContext(ctx, revokeAllUserTokens, userID)
+func (q *Queries) RevokeAllUserTokens(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, revokeAllUserTokens, userID)
 	return err
 }
 
@@ -140,8 +135,8 @@ set revoked = true
 where id = $1
 `
 
-func (q *Queries) RevokeRefreshToken(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, revokeRefreshToken, id)
+func (q *Queries) RevokeRefreshToken(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, revokeRefreshToken, id)
 	return err
 }
 
@@ -163,8 +158,8 @@ where refresh_tokens.id in (
   )
 `
 
-func (q *Queries) RevokeTokenFamily(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, revokeTokenFamily, id)
+func (q *Queries) RevokeTokenFamily(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, revokeTokenFamily, id)
 	return err
 }
 
@@ -174,7 +169,7 @@ set last_used_at = now()
 where id = $1
 `
 
-func (q *Queries) UpdateRefreshTokenLastUsed(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, updateRefreshTokenLastUsed, id)
+func (q *Queries) UpdateRefreshTokenLastUsed(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, updateRefreshTokenLastUsed, id)
 	return err
 }

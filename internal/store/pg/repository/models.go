@@ -5,59 +5,57 @@
 package repository
 
 import (
-	"database/sql"
-	"time"
+	"net/netip"
 
-	"github.com/google/uuid"
-	"github.com/sqlc-dev/pqtype"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AuditLog struct {
-	ID        uuid.UUID
-	UserID    uuid.NullUUID
-	EventType string
-	Ip        pqtype.Inet
-	Ua        sql.NullString
-	Payload   pqtype.NullRawMessage
-	CreatedAt sql.NullTime
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	EventType string             `json:"event_type"`
+	Ip        *netip.Addr        `json:"ip"`
+	Ua        pgtype.Text        `json:"ua"`
+	Payload   []byte             `json:"payload"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type EmailVerificationToken struct {
-	ID        uuid.UUID
-	UserID    uuid.NullUUID
-	TokenHash string
-	ExpiresAt time.Time
-	UsedAt    sql.NullTime
-	CreatedAt sql.NullTime
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type PasswordResetToken struct {
-	ID        uuid.UUID
-	UserID    uuid.NullUUID
-	TokenHash string
-	ExpiresAt time.Time
-	UsedAt    sql.NullTime
-	CreatedAt sql.NullTime
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type RefreshToken struct {
-	ID          uuid.UUID
-	UserID      uuid.NullUUID
-	DeviceInfo  sql.NullString
-	RotatedFrom uuid.NullUUID
-	Revoked     sql.NullBool
-	CreatedAt   sql.NullTime
-	ExpiresAt   time.Time
-	LastUsedAt  sql.NullTime
+	ID          pgtype.UUID        `json:"id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	DeviceInfo  pgtype.Text        `json:"device_info"`
+	RotatedFrom pgtype.UUID        `json:"rotated_from"`
+	Revoked     pgtype.Bool        `json:"revoked"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
 }
 
 type User struct {
-	ID             uuid.UUID
-	Email          string
-	PasswordHash   string
-	Permissions    int64
-	IsActive       sql.NullBool
-	EmailConfirmed sql.NullBool
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID             pgtype.UUID        `json:"id"`
+	Email          string             `json:"email"`
+	PasswordHash   string             `json:"password_hash"`
+	Permissions    int64              `json:"permissions"`
+	IsActive       pgtype.Bool        `json:"is_active"`
+	EmailConfirmed pgtype.Bool        `json:"email_confirmed"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }

@@ -7,9 +7,8 @@ package repository
 
 import (
 	"context"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const cleanExpiredEmailVerificationTokens = `-- name: CleanExpiredEmailVerificationTokens :exec
@@ -18,7 +17,7 @@ where expires_at < now()
 `
 
 func (q *Queries) CleanExpiredEmailVerificationTokens(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, cleanExpiredEmailVerificationTokens)
+	_, err := q.db.Exec(ctx, cleanExpiredEmailVerificationTokens)
 	return err
 }
 
@@ -29,13 +28,13 @@ returning id, user_id, token_hash, expires_at, used_at, created_at
 `
 
 type CreateEmailVerificationTokenParams struct {
-	UserID    uuid.NullUUID
-	TokenHash string
-	ExpiresAt time.Time
+	UserID    pgtype.UUID        `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
 func (q *Queries) CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (EmailVerificationToken, error) {
-	row := q.db.QueryRowContext(ctx, createEmailVerificationToken, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+	row := q.db.QueryRow(ctx, createEmailVerificationToken, arg.UserID, arg.TokenHash, arg.ExpiresAt)
 	var i EmailVerificationToken
 	err := row.Scan(
 		&i.ID,
@@ -56,8 +55,8 @@ where id = $1
     and expires_at > now()
 `
 
-func (q *Queries) GetEmailVerificationToken(ctx context.Context, id uuid.UUID) (EmailVerificationToken, error) {
-	row := q.db.QueryRowContext(ctx, getEmailVerificationToken, id)
+func (q *Queries) GetEmailVerificationToken(ctx context.Context, id pgtype.UUID) (EmailVerificationToken, error) {
+	row := q.db.QueryRow(ctx, getEmailVerificationToken, id)
 	var i EmailVerificationToken
 	err := row.Scan(
 		&i.ID,
@@ -79,7 +78,7 @@ where token_hash = $1
 `
 
 func (q *Queries) GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (EmailVerificationToken, error) {
-	row := q.db.QueryRowContext(ctx, getEmailVerificationTokenByHash, tokenHash)
+	row := q.db.QueryRow(ctx, getEmailVerificationTokenByHash, tokenHash)
 	var i EmailVerificationToken
 	err := row.Scan(
 		&i.ID,
@@ -98,7 +97,7 @@ set used_at = now()
 where id = $1
 `
 
-func (q *Queries) MarkEmailVerificationTokenUsed(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, markEmailVerificationTokenUsed, id)
+func (q *Queries) MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markEmailVerificationTokenUsed, id)
 	return err
 }

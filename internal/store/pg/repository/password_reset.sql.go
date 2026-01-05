@@ -7,9 +7,8 @@ package repository
 
 import (
 	"context"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const cleanExpiredPasswordResetTokens = `-- name: CleanExpiredPasswordResetTokens :exec
@@ -18,7 +17,7 @@ where expires_at < now()
 `
 
 func (q *Queries) CleanExpiredPasswordResetTokens(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, cleanExpiredPasswordResetTokens)
+	_, err := q.db.Exec(ctx, cleanExpiredPasswordResetTokens)
 	return err
 }
 
@@ -29,13 +28,13 @@ returning id, user_id, token_hash, expires_at, used_at, created_at
 `
 
 type CreatePasswordResetTokenParams struct {
-	UserID    uuid.NullUUID
-	TokenHash string
-	ExpiresAt time.Time
+	UserID    pgtype.UUID        `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
 func (q *Queries) CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordResetToken, error) {
-	row := q.db.QueryRowContext(ctx, createPasswordResetToken, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+	row := q.db.QueryRow(ctx, createPasswordResetToken, arg.UserID, arg.TokenHash, arg.ExpiresAt)
 	var i PasswordResetToken
 	err := row.Scan(
 		&i.ID,
@@ -56,8 +55,8 @@ where id = $1
     and expires_at > now()
 `
 
-func (q *Queries) GetPasswordResetToken(ctx context.Context, id uuid.UUID) (PasswordResetToken, error) {
-	row := q.db.QueryRowContext(ctx, getPasswordResetToken, id)
+func (q *Queries) GetPasswordResetToken(ctx context.Context, id pgtype.UUID) (PasswordResetToken, error) {
+	row := q.db.QueryRow(ctx, getPasswordResetToken, id)
 	var i PasswordResetToken
 	err := row.Scan(
 		&i.ID,
@@ -79,7 +78,7 @@ where token_hash = $1
 `
 
 func (q *Queries) GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error) {
-	row := q.db.QueryRowContext(ctx, getPasswordResetTokenByHash, tokenHash)
+	row := q.db.QueryRow(ctx, getPasswordResetTokenByHash, tokenHash)
 	var i PasswordResetToken
 	err := row.Scan(
 		&i.ID,
@@ -98,7 +97,7 @@ set used_at = now()
 where id = $1
 `
 
-func (q *Queries) MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, markPasswordResetTokenUsed, id)
+func (q *Queries) MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markPasswordResetTokenUsed, id)
 	return err
 }

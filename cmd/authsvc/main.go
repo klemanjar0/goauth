@@ -18,10 +18,13 @@ import (
 )
 
 func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	cfg := config.Load()
 	logger.Init(cfg.IsDevelopment)
 	logger.Info().Msg("logger ready for use")
-	db := store.InitializeDB(cfg)
+	db := store.InitializeDB(ctx, cfg)
 	defer db.Close()
 
 	redisClient := store.InitRedisClient(cfg)
@@ -41,9 +44,6 @@ func main() {
 	}
 
 	s := server.New(db, cfg, redisClient, kafkaServices)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	numConsumers := 3
 	for i := range numConsumers {

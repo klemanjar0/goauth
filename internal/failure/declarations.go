@@ -10,6 +10,8 @@ var (
 	ErrEnvironmentPort        = errors.New("port env variable is missing. applying default port 8080")
 	ErrDatabaseInitialization = errors.New("database failed to init")
 	ErrDatabaseMigration      = errors.New("database failed to run migrations")
+	ErrPoolConnection         = errors.New("failed to parse pool config")
+	ErrPoolCreate             = errors.New("failed to create pool")
 	ErrFailedToStartServer    = errors.New("server failed to start")
 	ErrForcedShutdownServer   = errors.New("server forced to shutdown")
 	ErrRedisClient            = errors.New("failed to connect to redis")

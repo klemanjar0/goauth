@@ -28,6 +28,14 @@ type GRPCConfig struct {
 	KeyFile    string
 }
 
+type PoolConfig struct {
+	MaxConns          int32
+	MinConns          int32
+	MaxConnLifetime   time.Duration
+	MaxConnIdleTime   time.Duration
+	HealthCheckPeriod time.Duration
+}
+
 type Config struct {
 	IsDevelopment        bool
 	RunMigrationsOnStart bool
@@ -36,6 +44,7 @@ type Config struct {
 	KafkaBrokers         []string
 	GRPCConfig           GRPCConfig
 	AllowedOrigins       []string
+	PoolConfig           PoolConfig
 }
 
 func Load() *Config {

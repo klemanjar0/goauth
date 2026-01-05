@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"goauth/internal/config"
 	"goauth/internal/grpc"
 	"goauth/internal/handler"
@@ -15,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -38,13 +38,13 @@ type Server struct {
 }
 
 func New(
-	db *sql.DB,
+	pool *pgxpool.Pool,
 	c *config.Config,
 	redis *store.RedisClient,
 	kServices *KafkaServices,
 ) *Server {
 	r := chi.NewRouter()
-	store := store.NewStore(db)
+	store := store.NewStore(pool)
 
 	httpServer := &http.Server{
 		Addr:    ":" + c.Port,

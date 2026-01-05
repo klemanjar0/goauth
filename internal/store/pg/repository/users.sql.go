@@ -7,9 +7,8 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -19,13 +18,13 @@ returning id, email, password_hash, permissions, is_active, email_confirmed, cre
 `
 
 type CreateUserParams struct {
-	Email        string
-	PasswordHash string
-	Permissions  int64
+	Email        string `json:"email"`
+	PasswordHash string `json:"password_hash"`
+	Permissions  int64  `json:"permissions"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, createUser, arg.Email, arg.PasswordHash, arg.Permissions)
+	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.PasswordHash, arg.Permissions)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -47,7 +46,7 @@ where email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -68,8 +67,8 @@ from users
 where id = $1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByID, id)
+func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -96,16 +95,16 @@ returning id, email, password_hash, permissions, is_active, email_confirmed, cre
 `
 
 type UpdateUserParams struct {
-	ID             uuid.UUID
-	Column2        interface{}
-	Column3        interface{}
-	Permissions    int64
-	IsActive       sql.NullBool
-	EmailConfirmed sql.NullBool
+	ID             pgtype.UUID `json:"id"`
+	Column2        interface{} `json:"column_2"`
+	Column3        interface{} `json:"column_3"`
+	Permissions    int64       `json:"permissions"`
+	IsActive       pgtype.Bool `json:"is_active"`
+	EmailConfirmed pgtype.Bool `json:"email_confirmed"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, updateUser,
+	row := q.db.QueryRow(ctx, updateUser,
 		arg.ID,
 		arg.Column2,
 		arg.Column3,
@@ -136,12 +135,12 @@ returning id, email, password_hash, permissions, is_active, email_confirmed, cre
 `
 
 type UpdateUserPasswordParams struct {
-	ID           uuid.UUID
-	PasswordHash string
+	ID           pgtype.UUID `json:"id"`
+	PasswordHash string      `json:"password_hash"`
 }
 
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
+	row := q.db.QueryRow(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -164,12 +163,12 @@ returning id, email, password_hash, permissions, is_active, email_confirmed, cre
 `
 
 type UpdateUserPermissionsParams struct {
-	ID          uuid.UUID
-	Permissions int64
+	ID          pgtype.UUID `json:"id"`
+	Permissions int64       `json:"permissions"`
 }
 
 func (q *Queries) UpdateUserPermissions(ctx context.Context, arg UpdateUserPermissionsParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, updateUserPermissions, arg.ID, arg.Permissions)
+	row := q.db.QueryRow(ctx, updateUserPermissions, arg.ID, arg.Permissions)
 	var i User
 	err := row.Scan(
 		&i.ID,

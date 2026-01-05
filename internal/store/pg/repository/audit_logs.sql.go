@@ -7,10 +7,9 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	"net/netip"
 
-	"github.com/google/uuid"
-	"github.com/sqlc-dev/pqtype"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const cleanOldAuditLogs = `-- name: CleanOldAuditLogs :exec
@@ -18,8 +17,8 @@ delete from audit_logs
 where created_at < $1
 `
 
-func (q *Queries) CleanOldAuditLogs(ctx context.Context, createdAt sql.NullTime) error {
-	_, err := q.db.ExecContext(ctx, cleanOldAuditLogs, createdAt)
+func (q *Queries) CleanOldAuditLogs(ctx context.Context, createdAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, cleanOldAuditLogs, createdAt)
 	return err
 }
 
@@ -30,15 +29,15 @@ returning id, user_id, event_type, ip, ua, payload, created_at
 `
 
 type CreateAuditLogParams struct {
-	UserID    uuid.NullUUID
-	EventType string
-	Ip        pqtype.Inet
-	Ua        sql.NullString
-	Payload   pqtype.NullRawMessage
+	UserID    pgtype.UUID `json:"user_id"`
+	EventType string      `json:"event_type"`
+	Ip        *netip.Addr `json:"ip"`
+	Ua        pgtype.Text `json:"ua"`
+	Payload   []byte      `json:"payload"`
 }
 
 func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error) {
-	row := q.db.QueryRowContext(ctx, createAuditLog,
+	row := q.db.QueryRow(ctx, createAuditLog,
 		arg.UserID,
 		arg.EventType,
 		arg.Ip,
@@ -67,18 +66,18 @@ limit $2 offset $3
 `
 
 type GetAuditLogsByEventTypeParams struct {
-	EventType string
-	Limit     int32
-	Offset    int32
+	EventType string `json:"event_type"`
+	Limit     int32  `json:"limit"`
+	Offset    int32  `json:"offset"`
 }
 
 func (q *Queries) GetAuditLogsByEventType(ctx context.Context, arg GetAuditLogsByEventTypeParams) ([]AuditLog, error) {
-	rows, err := q.db.QueryContext(ctx, getAuditLogsByEventType, arg.EventType, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, getAuditLogsByEventType, arg.EventType, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AuditLog
+	items := []AuditLog{}
 	for rows.Next() {
 		var i AuditLog
 		if err := rows.Scan(
@@ -93,9 +92,6 @@ func (q *Queries) GetAuditLogsByEventType(ctx context.Context, arg GetAuditLogsB
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -112,18 +108,18 @@ limit $2 offset $3
 `
 
 type GetAuditLogsByUserParams struct {
-	UserID uuid.NullUUID
-	Limit  int32
-	Offset int32
+	UserID pgtype.UUID `json:"user_id"`
+	Limit  int32       `json:"limit"`
+	Offset int32       `json:"offset"`
 }
 
 func (q *Queries) GetAuditLogsByUser(ctx context.Context, arg GetAuditLogsByUserParams) ([]AuditLog, error) {
-	rows, err := q.db.QueryContext(ctx, getAuditLogsByUser, arg.UserID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, getAuditLogsByUser, arg.UserID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AuditLog
+	items := []AuditLog{}
 	for rows.Next() {
 		var i AuditLog
 		if err := rows.Scan(
@@ -138,9 +134,6 @@ func (q *Queries) GetAuditLogsByUser(ctx context.Context, arg GetAuditLogsByUser
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -156,17 +149,17 @@ limit $1 offset $2
 `
 
 type GetRecentAuditLogsParams struct {
-	Limit  int32
-	Offset int32
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
 }
 
 func (q *Queries) GetRecentAuditLogs(ctx context.Context, arg GetRecentAuditLogsParams) ([]AuditLog, error) {
-	rows, err := q.db.QueryContext(ctx, getRecentAuditLogs, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, getRecentAuditLogs, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AuditLog
+	items := []AuditLog{}
 	for rows.Next() {
 		var i AuditLog
 		if err := rows.Scan(
@@ -181,9 +174,6 @@ func (q *Queries) GetRecentAuditLogs(ctx context.Context, arg GetRecentAuditLogs
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
