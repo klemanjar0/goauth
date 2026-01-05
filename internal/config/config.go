@@ -82,6 +82,14 @@ func Load() *Config {
 		DB:       0,
 	}
 
+	poolConfig := PoolConfig{
+		MinConns:          0,
+		MaxConns:          50,
+		MaxConnLifetime:   time.Hour,
+		MaxConnIdleTime:   time.Minute * 30,
+		HealthCheckPeriod: time.Minute,
+	}
+
 	auth.Init(auth.JWTConfig{
 		AccessSecret:  getEnv(constants.JWT_ACCESS_SECRET, ""),
 		RefreshSecret: getEnv(constants.JWT_REFRESH_SECRET, ""),
@@ -112,6 +120,7 @@ func Load() *Config {
 		RunMigrationsOnStart: RunMigrationsOnStart,
 		GRPCConfig:           grpcConfig,
 		AllowedOrigins:       allowedOrigins,
+		PoolConfig:           poolConfig,
 	}
 }
 
