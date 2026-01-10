@@ -79,6 +79,28 @@ func (q *Queries) GetRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshT
 	return i, err
 }
 
+const getRefreshTokenForUpdate = `-- name: GetRefreshTokenForUpdate :one
+SELECT id, user_id, device_info, rotated_from, revoked, created_at, expires_at, last_used_at FROM refresh_tokens
+WHERE id = $1 AND revoked = false AND expires_at > NOW()
+FOR UPDATE
+`
+
+func (q *Queries) GetRefreshTokenForUpdate(ctx context.Context, id pgtype.UUID) (RefreshToken, error) {
+	row := q.db.QueryRow(ctx, getRefreshTokenForUpdate, id)
+	var i RefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceInfo,
+		&i.RotatedFrom,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+	)
+	return i, err
+}
+
 const getUserActiveTokens = `-- name: GetUserActiveTokens :many
 select id, user_id, device_info, rotated_from, revoked, created_at, expires_at, last_used_at
 from refresh_tokens

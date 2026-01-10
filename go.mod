@@ -10,7 +10,6 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.16.0
-	github.com/sqlc-dev/pqtype v0.3.0
 	golang.org/x/crypto v0.45.0
 	google.golang.org/grpc v1.77.0
 	google.golang.org/protobuf v1.36.10

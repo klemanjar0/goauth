@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"goauth/internal"
 	"goauth/internal/failure"
@@ -50,6 +52,8 @@ func NewUserHandler(userService *service.UserService) *UserHandler {
 	}
 }
 
+const REQUEST_CTX_TIMEOUT = time.Second * 5
+
 func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 
@@ -67,7 +71,9 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	clientIP := utility.GetClientIP(r)
 	userAgent := r.UserAgent()
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
+
 	result, err := u.userService.RegisterUser(ctx, service.RegisterUserRequest{
 		Email:       req.Email,
 		Password:    req.Password,
@@ -149,7 +155,9 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	clientIP := utility.GetClientIP(r)
 	userAgent := r.UserAgent()
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
+
 	result, err := h.userService.LoginUser(ctx, service.LoginRequest{
 		Email:      req.Email,
 		Password:   req.Password,
@@ -248,7 +256,9 @@ func (h *UserHandler) VerifyCookieToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
+
 	result, verifyErr := h.userService.VerifyAccessToken(ctx, token)
 
 	if verifyErr != nil {
@@ -321,7 +331,9 @@ func (h *UserHandler) VerifyToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
+
 	result, err := h.userService.VerifyAccessToken(ctx, req.Token)
 
 	if err != nil {
@@ -394,7 +406,8 @@ func (h *UserHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
 	result, err := h.userService.RefreshAccessToken(ctx, service.RefreshTokenRequest{
 		RefreshToken: req.RefreshToken,
 		DeviceInfo:   r.UserAgent(),
@@ -489,7 +502,9 @@ func (h *UserHandler) RefreshTokenWithCookie(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
+
 	result, err := h.userService.RefreshAccessToken(ctx, service.RefreshTokenRequest{
 		RefreshToken: token,
 		DeviceInfo:   r.UserAgent(),
@@ -573,7 +588,9 @@ func (h *UserHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	accessToken := parts[1]
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
+
 	tokenInfo, err := h.userService.VerifyAccessToken(ctx, accessToken)
 	if err != nil {
 		if errors.Is(err, failure.ErrTokenExpired) || errors.Is(err, failure.ErrInvalidToken) {
@@ -628,7 +645,9 @@ func (h *UserHandler) LogoutWithCookie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
+
 	tokenInfo, err := h.userService.VerifyAccessToken(ctx, token)
 	if err != nil {
 		if errors.Is(err, failure.ErrTokenExpired) || errors.Is(err, failure.ErrInvalidToken) {
@@ -750,7 +769,9 @@ func (h *UserHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
+
 	if err := h.userService.SendPasswordResetEmail(ctx, req.Email); err != nil {
 		switch {
 		case errors.Is(err, failure.ErrDatabaseError):
@@ -812,7 +833,8 @@ func (h *UserHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 
 	clientIP := utility.GetClientIP(r)
 	userAgent := r.UserAgent()
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
+	defer cancel()
 
 	if err := h.userService.ResetPassword(ctx, service.ResetPasswordPayload{
 		Token:       req.Token,

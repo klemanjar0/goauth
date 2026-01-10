@@ -14,6 +14,7 @@ import (
 	"goauth/internal/utility"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
@@ -166,6 +167,11 @@ func (s *UserService) RegisterUser(ctx context.Context, req RegisterUserRequest)
 		Permissions:  permissions,
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			logger.Warn().Str("email", email).Msg("duplicate registration attempt")
+			return nil, failure.ErrUserAlreadyExists
+		}
+
 		logger.Error().
 			Err(err).
 			Str("email", email).
@@ -278,6 +284,16 @@ func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*reposi
 
 func (s *UserService) AuthenticateUser(ctx context.Context, email, password string) (*repository.User, error) {
 	user, err := s.GetUserByEmail(ctx, email)
+
+	var dummyHash string
+	if err != nil {
+		dummyHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$somehashvalue"
+	} else {
+		dummyHash = user.PasswordHash
+	}
+
+	valid, hashErr := s.hasher.VerifyPassword(password, dummyHash)
+
 	if err != nil {
 		if errors.Is(err, failure.ErrUserNotFound) {
 			return nil, failure.ErrInvalidCredentials
@@ -285,11 +301,19 @@ func (s *UserService) AuthenticateUser(ctx context.Context, email, password stri
 		return nil, err
 	}
 
+	if hashErr != nil {
+		logger.Error().Err(hashErr).Msg("error verifying password")
+		return nil, failure.ErrDatabaseError
+	}
+
 	if !user.IsActive.Bool {
 		return nil, failure.ErrUserInactive
 	}
 
-	valid, err := s.hasher.VerifyPassword(password, user.PasswordHash)
+	if !valid {
+		return nil, failure.ErrInvalidCredentials
+	}
+
 	if err != nil {
 		logger.Error().
 			Err(err).
@@ -298,18 +322,24 @@ func (s *UserService) AuthenticateUser(ctx context.Context, email, password stri
 		return nil, failure.ErrDatabaseError
 	}
 
-	if !valid {
-		return nil, failure.ErrInvalidCredentials
-	}
-
 	return user, nil
 }
 
 func (s *UserService) LoginUser(ctx context.Context, req LoginRequest) (*LoginResponse, error) {
-	user, err := s.AuthenticateUser(ctx, req.Email, req.Password)
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+
+	if s.isAccountLocked(ctx, email) {
+		logger.Warn().Str("email", email).Msg("login attempt on locked account")
+		return nil, failure.ErrInvalidCredentials
+	}
+
+	user, err := s.AuthenticateUser(ctx, email, req.Password)
 	if err != nil {
+		_ = s.recordFailedLogin(ctx, email)
 		return nil, err
 	}
+
+	s.resetFailedLogins(ctx, email)
 
 	accessToken, err := auth.GenerateAccessToken(user.ID.String())
 	if err != nil {
@@ -404,6 +434,7 @@ func (s *UserService) VerifyAccessToken(ctx context.Context, tokenString string)
 		logger.Warn().
 			Err(err).
 			Msg("redis error checking token blacklist")
+		return nil, failure.ErrDatabaseError
 	} else if exists > 0 {
 		return nil, failure.ErrTokenRevoked
 	}
@@ -470,65 +501,57 @@ func (s *UserService) RefreshAccessToken(ctx context.Context, req RefreshTokenRe
 		return nil, failure.ErrUserInactive
 	}
 
-	// check if this token was already used (possible token reuse attack)
-	// if rotated_from exists, it means this token was already rotated
-	if dbToken.LastUsedAt.Valid {
-		logger.Warn().
-			Str("token_id", refreshTokenID.String()).
-			Str("user_id", user.ID.String()).
-			Msg("refresh token reuse detected - revoking token family")
+	var accessToken, newRefreshToken string
+	var newDBToken repository.RefreshToken
+	var accessExpiresIn, refreshExpiresIn int64
 
-		err = s.store.Queries.RevokeTokenFamily(ctx, refreshTokenID)
+	err = s.store.ExecTx(ctx, func(tx *repository.Queries) error {
+		dbToken, err := tx.GetRefreshTokenForUpdate(ctx, refreshTokenID)
 		if err != nil {
-			logger.Error().Err(err).Msg("failed to revoke token family")
+			return err
 		}
-		return nil, failure.ErrTokenRevoked
-	}
 
-	err = s.store.Queries.UpdateRefreshTokenLastUsed(ctx, refreshTokenID)
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("token_id", refreshTokenID.String()).
-			Msg("failed to update refresh token last used")
-	}
+		if dbToken.LastUsedAt.Valid {
+			logger.Warn().Msg("refresh token reuse detected")
+			_ = tx.RevokeTokenFamily(ctx, refreshTokenID)
+			return failure.ErrTokenRevoked
+		}
 
-	accessToken, err := auth.GenerateAccessToken(user.ID.String())
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("failed to generate new access token")
-		return nil, failure.ErrTokenGeneration
-	}
+		if err := tx.UpdateRefreshTokenLastUsed(ctx, refreshTokenID); err != nil {
+			return err
+		}
 
-	refreshTokenExpiry := time.Now().Add(7 * 24 * time.Hour) // 7 days
-	newDBToken, err := s.store.Queries.CreateRefreshToken(ctx, repository.CreateRefreshTokenParams{
-		UserID:      user.ID,
-		DeviceInfo:  pgtype.Text{String: req.DeviceInfo, Valid: req.DeviceInfo != ""},
-		ExpiresAt:   pgtype.Timestamptz{Time: refreshTokenExpiry, Valid: true},
-		RotatedFrom: refreshTokenID, // link to old token
+		accessToken, err = auth.GenerateAccessToken(dbToken.UserID.String())
+		if err != nil {
+			return err
+		}
+
+		refreshTokenExpiry := time.Now().Add(7 * 24 * time.Hour)
+		newDBToken, err = tx.CreateRefreshToken(ctx, repository.CreateRefreshTokenParams{
+			UserID:      dbToken.UserID,
+			DeviceInfo:  pgtype.Text{String: req.DeviceInfo, Valid: req.DeviceInfo != ""},
+			ExpiresAt:   pgtype.Timestamptz{Time: refreshTokenExpiry, Valid: true},
+			RotatedFrom: refreshTokenID,
+		})
+		if err != nil {
+			return err
+		}
+
+		newRefreshToken, err = auth.GenerateRefreshToken(newDBToken.ID.String())
+		if err != nil {
+			return err
+		}
+
+		accessClaims, _ := auth.ValidateAccessToken(accessToken)
+		accessExpiresIn = int64(time.Until(accessClaims.ExpiresAt.Time).Seconds())
+		refreshExpiresIn = int64(time.Until(refreshTokenExpiry).Seconds())
+
+		return nil
 	})
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("failed to create new refresh token in database")
-		return nil, failure.ErrDatabaseError
-	}
 
-	newRefreshToken, err := auth.GenerateRefreshToken(newDBToken.ID.String())
 	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("failed to generate new refresh token JWT")
-		return nil, failure.ErrTokenGeneration
+		return nil, err
 	}
-
-	accessClaims, _ := auth.ValidateAccessToken(accessToken)
-	accessExpiresIn := int64(time.Until(accessClaims.ExpiresAt.Time).Seconds())
-	refreshExpiresIn := int64(time.Until(refreshTokenExpiry).Seconds())
 
 	logger.Info().
 		Str("user_id", user.ID.String()).
@@ -581,6 +604,13 @@ func (s *UserService) LogoutUser(ctx context.Context, accessToken string, userID
 	if err := s.BlacklistAccessToken(ctx, accessToken); err != nil {
 		return err
 	}
+
+	if err := s.RevokeAllUserTokens(ctx, userID, "user_logout"); err != nil {
+		logger.Error().Err(err).Str("user_id", userID.String()).Msg("failed to revoke refresh tokens on logout")
+		return err
+	}
+
+	s.InvalidateUserCache(ctx, userID)
 
 	err := s.createAuditLog(ctx, userID, "user_logout", ip, userAgent, map[string]any{
 		"reason": "user_initiated",
@@ -653,7 +683,7 @@ func (s *UserService) SendVerificationEmail(ctx context.Context, user *RegisterU
 	token := uuid.New().String()
 	params := repository.CreateEmailVerificationTokenParams{
 		UserID:    user.UserID,
-		TokenHash: token,
+		TokenHash: auth.HashToken256(token),
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 	}
 
@@ -772,11 +802,9 @@ func (s *UserService) ResetPassword(ctx context.Context, payload ResetPasswordPa
 		return failure.ErrPasswordHashError
 	}
 
-	err = s.store.ExecTx(ctx, func(*repository.Queries) error {
-		_, updateErr := s.
-			store.
-			Queries.
-			UpdateUserPassword(ctx, repository.UpdateUserPasswordParams{
+	err = s.store.ExecTx(ctx, func(tx *repository.Queries) error {
+		_, updateErr :=
+			tx.UpdateUserPassword(ctx, repository.UpdateUserPasswordParams{
 				ID:           user.ID,
 				PasswordHash: passwordHash,
 			})
@@ -788,7 +816,7 @@ func (s *UserService) ResetPassword(ctx context.Context, payload ResetPasswordPa
 			return updateErr
 		}
 
-		invErr := s.store.Queries.MarkPasswordResetTokenUsed(ctx, token.ID)
+		invErr := tx.MarkPasswordResetTokenUsed(ctx, token.ID)
 
 		if invErr != nil {
 			logger.Error().
@@ -798,11 +826,9 @@ func (s *UserService) ResetPassword(ctx context.Context, payload ResetPasswordPa
 			return invErr
 		}
 
-		if err := s.RevokeAllUserTokens(ctx, user.ID, "password reset"); err != nil {
+		if err := tx.RevokeAllUserTokens(ctx, user.ID); err != nil {
 			return err
 		}
-
-		s.InvalidateUserCache(ctx, user.ID)
 
 		return nil
 	})
@@ -815,7 +841,8 @@ func (s *UserService) ResetPassword(ctx context.Context, payload ResetPasswordPa
 		return failure.ErrPasswordReset
 	}
 
-	// move to transaction?
+	s.InvalidateUserCache(ctx, user.ID)
+
 	err = s.createAuditLog(ctx, user.ID, "user_password_reset", payload.IP, payload.UserAgent, map[string]any{
 		"reason": "user_initiated",
 	})
@@ -834,7 +861,8 @@ func (s *UserService) VerifyEmail(ctx context.Context, token string) error {
 		return failure.ErrInvalidToken
 	}
 
-	verificationToken, err := s.store.Queries.GetEmailVerificationTokenByHash(ctx, token)
+	tokenHash := auth.HashToken256(token)
+	verificationToken, err := s.store.Queries.GetEmailVerificationTokenByHash(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			logger.Warn().
@@ -848,31 +876,95 @@ func (s *UserService) VerifyEmail(ctx context.Context, token string) error {
 		return failure.ErrDatabaseError
 	}
 
-	if err := s.store.Queries.MarkEmailVerificationTokenUsed(ctx, verificationToken.ID); err != nil {
-		logger.Error().
-			Err(err).
-			Str("token_id", verificationToken.ID.String()).
-			Msg("failed to mark email verification token as used")
-		return failure.ErrDatabaseError
-	}
+	err = s.store.ExecTx(ctx, func(tx *repository.Queries) error {
+		if err := tx.MarkEmailVerificationTokenUsed(ctx, verificationToken.ID); err != nil {
+			logger.Error().
+				Err(err).
+				Str("token_id", verificationToken.ID.String()).
+				Msg("failed to mark email verification token as used")
+			return failure.ErrDatabaseError
+		}
 
-	_, err = s.store.Queries.UpdateUser(ctx, repository.UpdateUserParams{
-		ID:             verificationToken.UserID,
-		EmailConfirmed: pgtype.Bool{Bool: true, Valid: true},
+		_, updateErr := tx.UpdateUser(ctx, repository.UpdateUserParams{
+			ID:             verificationToken.UserID,
+			EmailConfirmed: pgtype.Bool{Bool: true, Valid: true},
+		})
+		if updateErr != nil {
+			logger.Error().
+				Err(updateErr).
+				Str("user_id", verificationToken.UserID.String()).
+				Msg("failed to update user email_confirmed status")
+			return failure.ErrDatabaseError
+		}
+
+		return nil
 	})
+
 	if err != nil {
 		logger.Error().
 			Err(err).
 			Str("user_id", verificationToken.UserID.String()).
-			Msg("failed to update user email_confirmed status")
+			Msg("email verification transaction failed")
 		return failure.ErrDatabaseError
 	}
 
 	s.InvalidateUserCache(ctx, verificationToken.UserID)
+
+	// Create audit log for email verification
+	err = s.createAuditLog(ctx, verificationToken.UserID, "email_verified", "", "", map[string]any{
+		"token_id": verificationToken.ID.String(),
+	})
+	if err != nil {
+		logger.Warn().
+			Err(err).
+			Str("user_id", verificationToken.UserID.String()).
+			Msg("failed to create audit log for email verification")
+	}
 
 	logger.Info().
 		Str("user_id", verificationToken.UserID.String()).
 		Msg("email verified successfully")
 
 	return nil
+}
+
+func (s *UserService) recordFailedLogin(ctx context.Context, email string) error {
+	key := "failed_login:" + email
+
+	count, err := s.redis.Incr(ctx, key).Result()
+	if err != nil {
+		return err
+	}
+
+	if count == 1 {
+		s.redis.Expire(ctx, key, 15*time.Minute)
+	}
+
+	if count >= 5 {
+		lockKey := "account_locked:" + email
+		s.redis.Set(ctx, lockKey, "locked", 30*time.Minute)
+		logger.Warn().Str("email", email).Msg("account locked due to failed login attempts")
+	}
+
+	return nil
+}
+
+func (s *UserService) isAccountLocked(ctx context.Context, email string) bool {
+	lockKey := "account_locked:" + email
+	exists, err := s.redis.Exists(ctx, lockKey).Result()
+	return err == nil && exists > 0
+}
+
+func (s *UserService) resetFailedLogins(ctx context.Context, email string) {
+	key := "failed_login:" + email
+	s.redis.Del(ctx, key)
+}
+
+func isUniqueViolation(err error) bool {
+	// Check for PostgreSQL unique constraint violation (error code 23505)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }

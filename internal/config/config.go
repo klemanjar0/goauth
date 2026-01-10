@@ -1,11 +1,14 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"goauth/internal/auth"
 	"goauth/internal/constants"
 	"goauth/internal/email"
 	"goauth/internal/failure"
 	"goauth/internal/logger"
+	"math"
 	"strings"
 
 	"os"
@@ -90,9 +93,16 @@ func Load() *Config {
 		HealthCheckPeriod: time.Minute,
 	}
 
+	accessSecret := getEnv(constants.JWT_ACCESS_SECRET, "")
+	refreshSecret := getEnv(constants.JWT_REFRESH_SECRET, "")
+
+	if err := validateJWTSecrets(accessSecret, refreshSecret); err != nil {
+		logger.Fatal().Err(err).Msg("invalid JWT configuration")
+	}
+
 	auth.Init(auth.JWTConfig{
-		AccessSecret:  getEnv(constants.JWT_ACCESS_SECRET, ""),
-		RefreshSecret: getEnv(constants.JWT_REFRESH_SECRET, ""),
+		AccessSecret:  accessSecret,
+		RefreshSecret: refreshSecret,
 		AccessTTL:     15 * time.Minute,
 		RefreshTTL:    7 * 24 * time.Hour,
 	})
@@ -147,4 +157,50 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func validateJWTSecrets(accessSecret, refreshSecret string) error {
+	const minSecretLength = 32 // 256 bits
+
+	if len(accessSecret) < minSecretLength {
+		return fmt.Errorf("JWT access secret must be at least %d characters (got %d)", minSecretLength, len(accessSecret))
+	}
+
+	if len(refreshSecret) < minSecretLength {
+		return fmt.Errorf("JWT refresh secret must be at least %d characters (got %d)", minSecretLength, len(refreshSecret))
+	}
+
+	if accessSecret == refreshSecret {
+		return errors.New("JWT access and refresh secrets must be different")
+	}
+
+	if !hasMinimumEntropy(accessSecret, 3.0) {
+		logger.Warn().Msg("JWT access secret has low entropy - consider using a randomly generated secret")
+	}
+
+	if !hasMinimumEntropy(refreshSecret, 3.0) {
+		logger.Warn().Msg("JWT refresh secret has low entropy - consider using a randomly generated secret")
+	}
+
+	return nil
+}
+
+func hasMinimumEntropy(s string, minEntropy float64) bool {
+	if len(s) == 0 {
+		return false
+	}
+
+	freq := make(map[rune]int)
+	for _, c := range s {
+		freq[c]++
+	}
+
+	var entropy float64
+	length := float64(len(s))
+	for _, count := range freq {
+		p := float64(count) / length
+		entropy -= p * math.Log2(p)
+	}
+
+	return entropy >= minEntropy
 }

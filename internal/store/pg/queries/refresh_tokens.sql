@@ -47,3 +47,7 @@ where user_id = $1
   and revoked = false
   and expires_at > now()
 order by created_at desc;
+-- name: GetRefreshTokenForUpdate :one
+SELECT * FROM refresh_tokens
+WHERE id = $1 AND revoked = false AND expires_at > NOW()
+FOR UPDATE;

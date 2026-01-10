@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"goauth/internal/config"
-	"goauth/internal/failure"
 	"goauth/internal/kafka"
 	"goauth/internal/logger"
 	"goauth/internal/server"
@@ -45,7 +45,10 @@ func main() {
 
 	s := server.New(db, cfg, redisClient, kafkaServices)
 
+	var wg sync.WaitGroup
+
 	numConsumers := 3
+	consumers := make([]*kafka.Consumer, numConsumers)
 	for i := range numConsumers {
 		consumer := kafka.NewConsumer(kafka.ConsumerConfig{
 			Brokers: brokers,
@@ -53,48 +56,57 @@ func main() {
 			GroupID: "email-workers",
 			Handler: service.HandleEmailMessage,
 		})
+		consumers[i] = consumer
 
+		wg.Add(1)
 		go func(c *kafka.Consumer, id int) {
+			defer wg.Done()
 			if err := c.Start(ctx); err != nil {
-				logger.Error().
-					Err(err).
-					Int("consumer_id", id).
-					Msg("consumer stopped with error")
+				logger.Error().Err(err).Int("consumer_id", id).Msg("consumer stopped with error")
 			}
+			logger.Info().Int("consumer_id", id).Msg("consumer shutdown complete")
 		}(consumer, i)
 	}
 
+	wg.Add(1)
 	go func() {
-		logger.Info().Str("addr", s.ServerInstance.Addr).Msg("starting server")
+		defer wg.Done()
+		logger.Info().Str("addr", s.ServerInstance.Addr).Msg("starting HTTP server")
 		if err := s.ServerInstance.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal().Err(err).Msg(failure.ErrFailedToStartServer.Error())
+			logger.Error().Err(err).Msg("HTTP server error")
 		}
+		logger.Info().Msg("HTTP server shutdown complete")
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		logger.Info().Msg("starting gRPC server")
 		if err := s.GrpcInstance.Start(); err != nil {
-			logger.Fatal().Err(err).Msg("grpc server failed")
+			logger.Error().Err(err).Msg("gRPC server error")
 		}
+		logger.Info().Msg("gRPC server shutdown complete")
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
+	logger.Info().Msg("shutdown signal received, starting graceful shutdown...")
+
 	cancel()
-
-	time.Sleep(5 * time.Second)
-
-	logger.Info().Msg("shutting down server...")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
 	if err := s.ServerInstance.Shutdown(shutdownCtx); err != nil {
-		logger.Fatal().Err(err).Msg(failure.ErrForcedShutdownServer.Error())
+		logger.Error().Err(err).Msg("HTTP server forced shutdown")
 	}
 
 	s.GrpcInstance.Stop()
+
+	logger.Info().Msg("waiting for all workers to finish...")
+	wg.Wait()
 
 	logger.Info().Msg("server stopped gracefully")
 }

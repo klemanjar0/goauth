@@ -96,8 +96,7 @@ func initGrpc(
 }
 
 func (s *Server) initRoutes() {
-	service := service.NewUserService(s.Store, s.Redis.Client, s.KafkaServices.EmailService)
-	handler := handler.NewUserHandler(service)
+	handler := handler.NewUserHandler(s.Services.UserService)
 
 	if len(s.Config.AllowedOrigins) > 0 {
 		corsConfig := middleware.CORSConfig{

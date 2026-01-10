@@ -137,12 +137,12 @@ func decodeHash(encodedHash string) (*hashParams, []byte, []byte, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	params.keyLen = uint32(len(salt))
 
 	hash, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
 	params.keyLen = uint32(len(hash))
 
 	return params, salt, hash, nil

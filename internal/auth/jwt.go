@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 var (
@@ -31,11 +32,16 @@ func Init(cfg JWTConfig) {
 }
 
 func GenerateAccessToken(userID string) (string, error) {
+	jti, _ := uuid.NewRandom()
+
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(config.AccessTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "goauth-service",
+			Audience:  []string{"api-gateway"},
+			ID:        jti.String(),
 		},
 	}
 
@@ -71,6 +77,10 @@ func ValidateAccessToken(tokenString string) (*Claims, error) {
 
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
+		return nil, ErrInvalidToken
+	}
+
+	if claims.Issuer != "goauth-service" {
 		return nil, ErrInvalidToken
 	}
 

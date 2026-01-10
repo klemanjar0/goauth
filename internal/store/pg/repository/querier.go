@@ -28,6 +28,7 @@ type Querier interface {
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	GetRecentAuditLogs(ctx context.Context, arg GetRecentAuditLogsParams) ([]AuditLog, error)
 	GetRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error)
+	GetRefreshTokenForUpdate(ctx context.Context, id pgtype.UUID) (RefreshToken, error)
 	GetUserActiveTokens(ctx context.Context, userID pgtype.UUID) ([]RefreshToken, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
