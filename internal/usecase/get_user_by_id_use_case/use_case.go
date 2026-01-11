@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"goauth/internal/constants"
 	"goauth/internal/failure"
 	"goauth/internal/logger"
 	"goauth/internal/store"
@@ -16,9 +18,8 @@ import (
 )
 
 type Params struct {
-	Store   *store.Store
-	Redis   *redis.Client
-	payload *Payload
+	Store *store.Store
+	Redis *redis.Client
 }
 
 type Payload struct {
@@ -55,8 +56,8 @@ func (s *GetUserByIdUseCase) getUserByID(ctx context.Context, userID pgtype.UUID
 }
 
 func (u *GetUserByIdUseCase) Execute() (*repository.User, error) {
-	userID := u.payload.UserID
-	cacheKey := "user:" + userID.String()
+	userID := u.UserID
+	cacheKey := fmt.Sprintf(constants.RedisKeyUserCache, u.UserID.String())
 
 	cachedData, err := u.Redis.Get(u.ctx, cacheKey).Result()
 	if err == nil && cachedData != "" {

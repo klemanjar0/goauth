@@ -12,7 +12,10 @@ import (
 	"goauth/internal/failure"
 	"goauth/internal/logger"
 	"goauth/internal/service"
+	loginusecase "goauth/internal/usecase/login_use_case"
+	refreshaccesstokenusecase "goauth/internal/usecase/refresh_access_token_use_case"
 	registerusecase "goauth/internal/usecase/register_use_case"
+	verifyaccesstokenusecase "goauth/internal/usecase/verify_access_token_use_case"
 	"goauth/internal/utility"
 )
 
@@ -159,7 +162,7 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	result, err := h.userService.LoginUser(ctx, service.LoginRequest{
+	result, err := h.userService.LoginUser(ctx, loginusecase.Payload{
 		Email:      req.Email,
 		Password:   req.Password,
 		DeviceInfo: userAgent,
@@ -260,7 +263,7 @@ func (h *UserHandler) VerifyCookieToken(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	result, verifyErr := h.userService.VerifyAccessToken(ctx, token)
+	result, verifyErr := h.userService.VerifyAccessToken(ctx, verifyaccesstokenusecase.Payload{Token: token})
 
 	if verifyErr != nil {
 		switch {
@@ -335,7 +338,7 @@ func (h *UserHandler) VerifyToken(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	result, err := h.userService.VerifyAccessToken(ctx, req.Token)
+	result, err := h.userService.VerifyAccessToken(ctx, verifyaccesstokenusecase.Payload{Token: req.Token})
 
 	if err != nil {
 		switch {
@@ -409,7 +412,7 @@ func (h *UserHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
-	result, err := h.userService.RefreshAccessToken(ctx, service.RefreshTokenRequest{
+	result, err := h.userService.RefreshAccessToken(ctx, refreshaccesstokenusecase.Payload{
 		RefreshToken: req.RefreshToken,
 		DeviceInfo:   r.UserAgent(),
 	})
@@ -506,7 +509,7 @@ func (h *UserHandler) RefreshTokenWithCookie(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	result, err := h.userService.RefreshAccessToken(ctx, service.RefreshTokenRequest{
+	result, err := h.userService.RefreshAccessToken(ctx, refreshaccesstokenusecase.Payload{
 		RefreshToken: token,
 		DeviceInfo:   r.UserAgent(),
 	})
@@ -592,7 +595,7 @@ func (h *UserHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	tokenInfo, err := h.userService.VerifyAccessToken(ctx, accessToken)
+	tokenInfo, err := h.userService.VerifyAccessToken(ctx, verifyaccesstokenusecase.Payload{Token: accessToken})
 	if err != nil {
 		if errors.Is(err, failure.ErrTokenExpired) || errors.Is(err, failure.ErrInvalidToken) {
 			internal.Respond(w).OK(map[string]any{
@@ -649,7 +652,7 @@ func (h *UserHandler) LogoutWithCookie(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	tokenInfo, err := h.userService.VerifyAccessToken(ctx, token)
+	tokenInfo, err := h.userService.VerifyAccessToken(ctx, verifyaccesstokenusecase.Payload{Token: token})
 	if err != nil {
 		if errors.Is(err, failure.ErrTokenExpired) || errors.Is(err, failure.ErrInvalidToken) {
 			internal.Respond(w).OK(map[string]any{

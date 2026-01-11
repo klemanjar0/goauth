@@ -67,7 +67,6 @@ func New(
 
 func (u *RegisterUseCase) Execute() (*Response, error) {
 	req := u.Payload
-	ctx := u.ctx
 
 	if err := utility.ValidateEmail(req.Email); err != nil {
 		logger.Warn().
@@ -87,13 +86,13 @@ func (u *RegisterUseCase) Execute() (*Response, error) {
 		return nil, err
 	}
 
-	existingUser, err := u.Store.Queries.GetUserByEmail(ctx, email)
+	existingUser, err := u.Store.Queries.GetUserByEmail(u.ctx, email)
 	if err == nil && existingUser.ID.Valid {
 		logger.Warn().
 			Str("email", email).
 			Msg("attempted registration with existing email")
 
-		_ = createauditlogusecase.New(ctx, &createauditlogusecase.Params{
+		_ = createauditlogusecase.New(u.ctx, &createauditlogusecase.Params{
 			Store: u.Store,
 		}, &createauditlogusecase.Payload{
 			UserID:    pgtype.UUID{Valid: false},
@@ -130,7 +129,7 @@ func (u *RegisterUseCase) Execute() (*Response, error) {
 		permissions = defaultPermissions
 	}
 
-	user, err := u.Store.Queries.CreateUser(ctx, repository.CreateUserParams{
+	user, err := u.Store.Queries.CreateUser(u.ctx, repository.CreateUserParams{
 		Email:        email,
 		PasswordHash: passwordHash,
 		Permissions:  permissions,
@@ -148,7 +147,7 @@ func (u *RegisterUseCase) Execute() (*Response, error) {
 		return nil, failure.ErrDatabaseError
 	}
 
-	err = createauditlogusecase.New(ctx, &createauditlogusecase.Params{
+	err = createauditlogusecase.New(u.ctx, &createauditlogusecase.Params{
 		Store: u.Store,
 	}, &createauditlogusecase.Payload{
 		UserID:    user.ID,

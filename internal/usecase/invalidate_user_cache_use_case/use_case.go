@@ -2,6 +2,8 @@ package invalidateusercacheusecase
 
 import (
 	"context"
+	"fmt"
+	"goauth/internal/constants"
 	"goauth/internal/logger"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -30,13 +32,12 @@ func New(ctx context.Context, params *Params, payload *Payload) *InvalidateUserC
 	}
 }
 
-func (u *InvalidateUserCacheUseCase) Execute() {
-	cacheKey := "user:" + u.UserID.String()
+func (u *InvalidateUserCacheUseCase) Execute() error {
+	cacheKey := fmt.Sprintf(constants.RedisKeyUserCache, u.UserID.String())
 	err := u.Redis.Del(u.ctx, cacheKey).Err()
 	if err != nil {
-		logger.Warn().
-			Err(err).
-			Str("user_id", u.UserID.String()).
-			Msg("failed to invalidate user cache")
+		logger.Warn().Err(err).Str("user_id", u.UserID.String()).Msg("failed to invalidate user cache")
+		return err
 	}
+	return nil
 }

@@ -5,6 +5,8 @@ import (
 	"goauth/internal/constants"
 	"goauth/internal/store"
 	getuserbyidusecase "goauth/internal/usecase/get_user_by_id_use_case"
+	refreshaccesstokenusecase "goauth/internal/usecase/refresh_access_token_use_case"
+	revokeusertokensusecase "goauth/internal/usecase/revoke_user_tokens_use_case"
 	verifyaccesstokenusecase "goauth/internal/usecase/verify_access_token_use_case"
 	"goauth/pkg/authpb"
 
@@ -145,15 +147,15 @@ func (h *AuthHandler) RefreshToken(ctx context.Context, req *authpb.RefreshToken
 		}
 	}
 
-	payload := struct {
-		RefreshToken string
-		DeviceInfo   string
-	}{
-		RefreshToken: req.RefreshToken,
-		DeviceInfo:   deviceInfo,
-	}
+	resp, err := refreshaccesstokenusecase.
+		New(ctx,
+			&refreshaccesstokenusecase.Params{Store: h.store, Redis: h.redis},
+			&refreshaccesstokenusecase.Payload{
+				RefreshToken: req.RefreshToken,
+				DeviceInfo:   deviceInfo,
+			},
+		).Execute()
 
-	resp, err := h.userService.RefreshAccessToken(ctx, payload)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired refresh token")
 	}
@@ -176,7 +178,13 @@ func (h *AuthHandler) RevokeUserTokens(ctx context.Context, req *authpb.RevokeUs
 		return nil, status.Error(codes.InvalidArgument, "invalid user_id format")
 	}
 
-	err = h.userService.RevokeAllUserTokens(ctx, userId, "")
+	err = revokeusertokensusecase.
+		New(ctx,
+			&revokeusertokensusecase.Params{Store: h.store},
+			&revokeusertokensusecase.Payload{UserID: userId, Reason: "grpc_initiated"},
+		).
+		Execute()
+
 	if err != nil {
 		return nil, err
 	}

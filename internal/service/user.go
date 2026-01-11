@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
-	"strings"
 	"time"
 
 	"goauth/internal/failure"
@@ -15,7 +14,11 @@ import (
 	getuserbyemailusecase "goauth/internal/usecase/get_user_by_email_use_case"
 	getuserbyidusecase "goauth/internal/usecase/get_user_by_id_use_case"
 	invalidateusercacheusecase "goauth/internal/usecase/invalidate_user_cache_use_case"
+	loginusecase "goauth/internal/usecase/login_use_case"
+	logoutusecase "goauth/internal/usecase/logout_use_case"
+	refreshaccesstokenusecase "goauth/internal/usecase/refresh_access_token_use_case"
 	registerusecase "goauth/internal/usecase/register_use_case"
+	verifyaccesstokenusecase "goauth/internal/usecase/verify_access_token_use_case"
 	"goauth/internal/utility"
 
 	"github.com/google/uuid"
@@ -32,38 +35,6 @@ type UserService struct {
 	redis        *redis.Client
 	hasher       *auth.PasswordHasher
 	emailService *EmailService
-}
-
-type RefreshTokenRequest struct {
-	RefreshToken string
-	DeviceInfo   string
-}
-
-type RefreshTokenResponse struct {
-	AccessToken      string
-	RefreshToken     string
-	RefreshTokenID   pgtype.UUID
-	AccessExpiresIn  int64 // seconds until access token expires
-	RefreshExpiresIn int64 // seconds until refresh token expires
-}
-
-type LoginResponse struct {
-	UserID           pgtype.UUID
-	Email            string
-	Permissions      int64
-	AccessToken      string
-	RefreshToken     string
-	RefreshTokenID   pgtype.UUID
-	AccessExpiresIn  int64
-	RefreshExpiresIn int64
-}
-
-type LoginRequest struct {
-	Email      string
-	Password   string
-	DeviceInfo string
-	IP         string
-	UserAgent  string
 }
 
 type VerifyTokenResponse struct {
@@ -139,327 +110,47 @@ func (s *UserService) AuthenticateUser(ctx context.Context, email, password stri
 		Execute()
 }
 
-func (s *UserService) LoginUser(ctx context.Context, req LoginRequest) (*LoginResponse, error) {
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-
-	if s.isAccountLocked(ctx, email) {
-		logger.Warn().Str("email", email).Msg("login attempt on locked account")
-		return nil, failure.ErrInvalidCredentials
-	}
-
-	user, err := s.AuthenticateUser(ctx, email, req.Password)
-	if err != nil {
-		_ = s.recordFailedLogin(ctx, email)
-		return nil, err
-	}
-
-	s.resetFailedLogins(ctx, email)
-
-	accessToken, err := auth.GenerateAccessToken(user.ID.String())
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("failed to generate access token")
-		return nil, failure.ErrTokenGeneration
-	}
-
-	refreshTokenExpiry := time.Now().Add(7 * 24 * time.Hour) // 7 days
-	dbToken, err := s.store.Queries.CreateRefreshToken(ctx, repository.CreateRefreshTokenParams{
-		UserID:      user.ID,
-		DeviceInfo:  pgtype.Text{String: req.DeviceInfo, Valid: req.DeviceInfo != ""},
-		ExpiresAt:   pgtype.Timestamptz{Time: refreshTokenExpiry, Valid: true},
-		RotatedFrom: pgtype.UUID{Valid: false}, // no rotation for initial login
-	})
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("failed to create refresh token in database")
-		return nil, failure.ErrDatabaseError
-	}
-
-	// generate refresh token jwt with the database token id as subject
-	refreshToken, err := auth.GenerateRefreshToken(dbToken.ID.String())
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("failed to generate refresh token JWT")
-		return nil, failure.ErrTokenGeneration
-	}
-
-	err = s.createAuditLog(ctx, user.ID, "user_login", req.IP, req.UserAgent, map[string]any{
-		"email":            user.Email,
-		"refresh_token_id": dbToken.ID.String(),
-	})
-	if err != nil {
-		logger.Warn().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("failed to create audit log for login")
-	}
-
-	accessClaims, _ := auth.ValidateAccessToken(accessToken)
-	accessExpiresIn := int64(time.Until(accessClaims.ExpiresAt.Time).Seconds())
-	refreshExpiresIn := int64(time.Until(refreshTokenExpiry).Seconds())
-
-	logger.Info().
-		Str("user_id", user.ID.String()).
-		Str("email", user.Email).
-		Str("refresh_token_id", dbToken.ID.String()).
-		Msg("user logged in successfully")
-
-	return &LoginResponse{
-		UserID:           user.ID,
-		Email:            user.Email,
-		Permissions:      user.Permissions,
-		AccessToken:      accessToken,
-		RefreshToken:     refreshToken,
-		RefreshTokenID:   dbToken.ID,
-		AccessExpiresIn:  accessExpiresIn,
-		RefreshExpiresIn: refreshExpiresIn,
-	}, nil
+func (s *UserService) VerifyAccessToken(ctx context.Context, req verifyaccesstokenusecase.Payload) (*verifyaccesstokenusecase.Response, error) {
+	return verifyaccesstokenusecase.New(
+		ctx,
+		&verifyaccesstokenusecase.Params{
+			Store: s.store,
+			Redis: s.redis,
+		},
+		&req,
+	).Execute()
 }
 
-func (s *UserService) VerifyAccessToken(ctx context.Context, tokenString string) (*VerifyTokenResponse, error) {
-	claims, err := auth.ValidateAccessToken(tokenString)
-	if err != nil {
-		if errors.Is(err, auth.ErrExpiredToken) {
-			return nil, failure.ErrTokenExpired
-		}
-		return nil, failure.ErrInvalidToken
-	}
-
-	id, err := uuid.Parse(claims.UserID)
-	userID := pgtype.UUID{Bytes: [16]byte(id), Valid: true}
-	if err != nil {
-		logger.Warn().
-			Str("user_id", claims.UserID).
-			Err(err).
-			Msg("invalid user_id in token claims")
-		return nil, failure.ErrInvalidToken
-	}
-
-	// check if token is blacklisted in redis (for logout)
-	blacklistKey := "blacklist:access:" + tokenString
-	exists, err := s.redis.Exists(ctx, blacklistKey).Result()
-	if err != nil {
-		logger.Warn().
-			Err(err).
-			Msg("redis error checking token blacklist")
-		return nil, failure.ErrDatabaseError
-	} else if exists > 0 {
-		return nil, failure.ErrTokenRevoked
-	}
-
-	user, err := s.GetUserByIDWithCache(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	if !user.IsActive.Bool {
-		return nil, failure.ErrUserInactive
-	}
-
-	return &VerifyTokenResponse{
-		Valid:       true,
-		UserID:      user.ID,
-		Email:       user.Email,
-		Permissions: user.Permissions,
-		ExpiresAt:   claims.ExpiresAt.Time,
-	}, nil
+func (s *UserService) LoginUser(ctx context.Context, req loginusecase.Payload) (*loginusecase.Response, error) {
+	return loginusecase.New(
+		ctx,
+		&loginusecase.Params{
+			Store:  s.store,
+			Redis:  s.redis,
+			Hasher: s.hasher,
+		},
+		&req,
+	).Execute()
 }
 
-func (s *UserService) RefreshAccessToken(ctx context.Context, req RefreshTokenRequest) (*RefreshTokenResponse, error) {
-	refreshTokenIDStr, err := auth.ValidateRefreshToken(req.RefreshToken)
-	if err != nil {
-		if errors.Is(err, auth.ErrExpiredToken) {
-			return nil, failure.ErrTokenExpired
-		}
-		return nil, failure.ErrInvalidToken
-	}
-
-	// parse the token id from jwt subject
-	refreshTokenUUID, err := uuid.Parse(refreshTokenIDStr)
-	refreshTokenID := pgtype.UUID{Bytes: [16]byte(refreshTokenUUID), Valid: true}
-	if err != nil {
-		logger.Warn().
-			Str("token_id", refreshTokenIDStr).
-			Err(err).
-			Msg("invalid token_id in refresh token")
-		return nil, failure.ErrInvalidToken
-	}
-
-	dbToken, err := s.store.Queries.GetRefreshToken(ctx, refreshTokenID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			logger.Warn().
-				Str("token_id", refreshTokenID.String()).
-				Msg("refresh token not found or expired")
-			return nil, failure.ErrInvalidToken
-		}
-		logger.Error().
-			Err(err).
-			Str("token_id", refreshTokenID.String()).
-			Msg("database error while fetching refresh token")
-		return nil, failure.ErrDatabaseError
-	}
-
-	user, err := s.GetUserByIDWithCache(ctx, dbToken.UserID)
-	if err != nil {
-		return nil, err
-	}
-
-	if !user.IsActive.Bool {
-		return nil, failure.ErrUserInactive
-	}
-
-	var accessToken, newRefreshToken string
-	var newDBToken repository.RefreshToken
-	var accessExpiresIn, refreshExpiresIn int64
-
-	err = s.store.ExecTx(ctx, func(tx *repository.Queries) error {
-		dbToken, err := tx.GetRefreshTokenForUpdate(ctx, refreshTokenID)
-		if err != nil {
-			return err
-		}
-
-		if dbToken.LastUsedAt.Valid {
-			logger.Warn().Msg("refresh token reuse detected")
-			_ = tx.RevokeTokenFamily(ctx, refreshTokenID)
-			return failure.ErrTokenRevoked
-		}
-
-		if err := tx.UpdateRefreshTokenLastUsed(ctx, refreshTokenID); err != nil {
-			return err
-		}
-
-		accessToken, err = auth.GenerateAccessToken(dbToken.UserID.String())
-		if err != nil {
-			return err
-		}
-
-		refreshTokenExpiry := time.Now().Add(7 * 24 * time.Hour)
-		newDBToken, err = tx.CreateRefreshToken(ctx, repository.CreateRefreshTokenParams{
-			UserID:      dbToken.UserID,
-			DeviceInfo:  pgtype.Text{String: req.DeviceInfo, Valid: req.DeviceInfo != ""},
-			ExpiresAt:   pgtype.Timestamptz{Time: refreshTokenExpiry, Valid: true},
-			RotatedFrom: refreshTokenID,
-		})
-		if err != nil {
-			return err
-		}
-
-		newRefreshToken, err = auth.GenerateRefreshToken(newDBToken.ID.String())
-		if err != nil {
-			return err
-		}
-
-		accessClaims, _ := auth.ValidateAccessToken(accessToken)
-		accessExpiresIn = int64(time.Until(accessClaims.ExpiresAt.Time).Seconds())
-		refreshExpiresIn = int64(time.Until(refreshTokenExpiry).Seconds())
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	logger.Info().
-		Str("user_id", user.ID.String()).
-		Str("old_token_id", refreshTokenID.String()).
-		Str("new_token_id", newDBToken.ID.String()).
-		Msg("tokens refreshed successfully with rotation")
-
-	return &RefreshTokenResponse{
-		AccessToken:      accessToken,
-		RefreshToken:     newRefreshToken,
-		RefreshTokenID:   newDBToken.ID,
-		AccessExpiresIn:  accessExpiresIn,
-		RefreshExpiresIn: refreshExpiresIn,
-	}, nil
-}
-
-func (s *UserService) BlacklistAccessToken(ctx context.Context, tokenString string) error {
-	claims, err := auth.ValidateAccessToken(tokenString)
-	if err != nil {
-		logger.Debug().
-			Err(err).
-			Msg("attempted to blacklist invalid token")
-		return nil
-	}
-
-	ttl := time.Until(claims.ExpiresAt.Time)
-	if ttl <= 0 {
-		return nil
-	}
-
-	blacklistKey := "blacklist:access:" + tokenString
-	err = s.redis.Set(ctx, blacklistKey, "revoked", ttl).Err()
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("token_preview", tokenString[:20]+"...").
-			Msg("failed to blacklist token in redis")
-		return failure.ErrDatabaseError
-	}
-
-	logger.Info().
-		Str("user_id", claims.UserID).
-		Dur("ttl", ttl).
-		Msg("access token blacklisted successfully")
-
-	return nil
+func (s *UserService) RefreshAccessToken(ctx context.Context, req refreshaccesstokenusecase.Payload) (*refreshaccesstokenusecase.Response, error) {
+	return refreshaccesstokenusecase.
+		New(
+			ctx,
+			&refreshaccesstokenusecase.Params{
+				Store: s.store,
+				Redis: s.redis,
+			},
+			&req,
+		).Execute()
 }
 
 func (s *UserService) LogoutUser(ctx context.Context, accessToken string, userID pgtype.UUID, ip, userAgent string) error {
-	if err := s.BlacklistAccessToken(ctx, accessToken); err != nil {
-		return err
-	}
-
-	if err := s.RevokeAllUserTokens(ctx, userID, "user_logout"); err != nil {
-		logger.Error().Err(err).Str("user_id", userID.String()).Msg("failed to revoke refresh tokens on logout")
-		return err
-	}
-
-	s.InvalidateUserCache(ctx, userID)
-
-	err := s.createAuditLog(ctx, userID, "user_logout", ip, userAgent, map[string]any{
-		"reason": "user_initiated",
-	})
-	if err != nil {
-		logger.Warn().
-			Err(err).
-			Str("user_id", userID.String()).
-			Msg("failed to create audit log for logout")
-	}
-
-	logger.Info().
-		Str("user_id", userID.String()).
-		Msg("user logged out successfully")
-
-	return nil
-}
-
-// todo: use for password reset
-func (s *UserService) RevokeAllUserTokens(ctx context.Context, userID pgtype.UUID, reason string) error {
-	err := s.store.Queries.RevokeAllUserTokens(ctx, userID)
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", userID.String()).
-			Msg("failed to revoke all user tokens in database")
-		return failure.ErrDatabaseError
-	}
-
-	logger.Info().
-		Str("user_id", userID.String()).
-		Str("reason", reason).
-		Msg("all user refresh tokens revoked in database")
-
-	return nil
+	return logoutusecase.New(
+		ctx,
+		&logoutusecase.Params{Store: s.store, Redis: s.redis},
+		&logoutusecase.Payload{AccessToken: accessToken, UserID: userID, IP: ip, UserAgent: userAgent},
+	).Execute()
 }
 
 func (s *UserService) createAuditLog(ctx context.Context, userID pgtype.UUID, eventType, ip, userAgent string, payload map[string]any) error {
@@ -740,36 +431,4 @@ func (s *UserService) VerifyEmail(ctx context.Context, token string) error {
 		Msg("email verified successfully")
 
 	return nil
-}
-
-func (s *UserService) recordFailedLogin(ctx context.Context, email string) error {
-	key := "failed_login:" + email
-
-	count, err := s.redis.Incr(ctx, key).Result()
-	if err != nil {
-		return err
-	}
-
-	if count == 1 {
-		s.redis.Expire(ctx, key, 15*time.Minute)
-	}
-
-	if count >= 5 {
-		lockKey := "account_locked:" + email
-		s.redis.Set(ctx, lockKey, "locked", 30*time.Minute)
-		logger.Warn().Str("email", email).Msg("account locked due to failed login attempts")
-	}
-
-	return nil
-}
-
-func (s *UserService) isAccountLocked(ctx context.Context, email string) bool {
-	lockKey := "account_locked:" + email
-	exists, err := s.redis.Exists(ctx, lockKey).Result()
-	return err == nil && exists > 0
-}
-
-func (s *UserService) resetFailedLogins(ctx context.Context, email string) {
-	key := "failed_login:" + email
-	s.redis.Del(ctx, key)
 }

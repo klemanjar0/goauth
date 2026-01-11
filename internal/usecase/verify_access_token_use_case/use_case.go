@@ -3,7 +3,9 @@ package verifyaccesstokenusecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"goauth/internal/auth"
+	"goauth/internal/constants"
 	"goauth/internal/failure"
 	"goauth/internal/logger"
 	"goauth/internal/store"
@@ -24,7 +26,7 @@ type Payload struct {
 	Token string
 }
 
-type VerifyTokenResponse struct {
+type Response struct {
 	Valid       bool
 	UserID      pgtype.UUID
 	Email       string
@@ -43,7 +45,7 @@ func New(ctx context.Context, params *Params, payload *Payload) *VerifyAccessTok
 	return &VerifyAccessTokenUseCase{ctx: ctx, Params: params, Payload: payload}
 }
 
-func (u *VerifyAccessTokenUseCase) Execute() (*VerifyTokenResponse, error) {
+func (u *VerifyAccessTokenUseCase) Execute() (*Response, error) {
 	tokenString := u.Token
 
 	claims, err := auth.ValidateAccessToken(tokenString)
@@ -65,7 +67,7 @@ func (u *VerifyAccessTokenUseCase) Execute() (*VerifyTokenResponse, error) {
 	}
 
 	// check if token is blacklisted in redis (for logout)
-	blacklistKey := "blacklist:access:" + tokenString
+	blacklistKey := fmt.Sprintf(constants.RedisKeyAccessBlacklist, tokenString)
 	exists, err := u.Redis.Exists(u.ctx, blacklistKey).Result()
 	if err != nil {
 		logger.Warn().
@@ -91,7 +93,7 @@ func (u *VerifyAccessTokenUseCase) Execute() (*VerifyTokenResponse, error) {
 		return nil, failure.ErrUserInactive
 	}
 
-	return &VerifyTokenResponse{
+	return &Response{
 		Valid:       true,
 		UserID:      user.ID,
 		Email:       user.Email,

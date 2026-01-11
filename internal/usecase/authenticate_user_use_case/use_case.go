@@ -48,15 +48,16 @@ func (u *AuthenticateUserUseCase) Execute() (*repository.User, error) {
 
 	valid, hashErr := u.Hasher.VerifyPassword(u.Password, dummyHash)
 
+	if hashErr != nil {
+		logger.Error().Err(hashErr).Msg("error verifying password")
+		return nil, failure.ErrDatabaseError
+	}
+
 	if err != nil {
 		if errors.Is(err, failure.ErrUserNotFound) {
 			return nil, failure.ErrInvalidCredentials
 		}
-		return nil, err
-	}
-
-	if hashErr != nil {
-		logger.Error().Err(hashErr).Msg("error verifying password")
+		logger.Error().Err(err).Msg("database error fetching user")
 		return nil, failure.ErrDatabaseError
 	}
 
@@ -66,14 +67,6 @@ func (u *AuthenticateUserUseCase) Execute() (*repository.User, error) {
 
 	if !valid {
 		return nil, failure.ErrInvalidCredentials
-	}
-
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("error verifying password")
-		return nil, failure.ErrDatabaseError
 	}
 
 	return user, nil
