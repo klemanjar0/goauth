@@ -4,6 +4,7 @@ import (
 	"goauth/internal/config"
 	"goauth/internal/grpc"
 	"goauth/internal/handler"
+	"goauth/internal/kafka"
 	"goauth/internal/logger"
 	"goauth/internal/middleware"
 	"goauth/internal/service"
@@ -18,10 +19,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-type KafkaServices struct {
-	EmailService *service.EmailService
-}
-
 type Services struct {
 	UserService *service.UserService
 }
@@ -31,9 +28,8 @@ type Server struct {
 	App            *chi.Mux
 	ServerInstance *http.Server
 	Redis          *store.RedisClient
-	KafkaServices  *KafkaServices
+	KafkaProducer  *kafka.Producer
 	GrpcInstance   *grpc.Server
-	Services       *Services
 	Config         *config.Config
 }
 
@@ -41,7 +37,7 @@ func New(
 	pool *pgxpool.Pool,
 	c *config.Config,
 	redis *store.RedisClient,
-	kServices *KafkaServices,
+	KafkaProducer *kafka.Producer,
 ) *Server {
 	r := chi.NewRouter()
 	store := store.NewStore(pool)
@@ -51,52 +47,30 @@ func New(
 		Handler: r,
 	}
 
-	services := initServices(store, redis, kServices)
+	grpcServer, grpcErr := grpc.NewServer(c, store, redis)
+
+	if grpcErr != nil {
+		logger.Fatal().Err(grpcErr).Msg("failed to create grpc server")
+	}
 
 	s := &Server{
 		App:            r,
 		Store:          store,
 		ServerInstance: httpServer,
 		Redis:          redis,
-		KafkaServices:  kServices,
+		KafkaProducer:  KafkaProducer,
 		Config:         c,
-		Services:       services,
-		GrpcInstance:   initGrpc(c, store, redis),
+		GrpcInstance:   grpcServer,
 	}
 
-	s.initRoutes()
+	s.setupRouter()
 
 	return s
 }
 
-func initServices(
-	store *store.Store,
-	redis *store.RedisClient,
-	kServices *KafkaServices,
-) *Services {
-	userService := service.NewUserService(store, redis.Client, kServices.EmailService)
-
-	return &Services{
-		UserService: userService,
-	}
-}
-
-func initGrpc(
-	config *config.Config,
-	store *store.Store,
-	redis *store.RedisClient,
-) *grpc.Server {
-	grpcServer, err := grpc.NewServer(config, store, redis)
-
-	if err != nil {
-		logger.Fatal().Err(err).Msg("failed to create grpc server")
-	}
-
-	return grpcServer
-}
-
-func (s *Server) initRoutes() {
-	handler := handler.NewUserHandler(s.Services.UserService)
+func (s *Server) setupRouter() {
+	userService := service.NewUserService(s.Store, s.Redis.Client, s.KafkaProducer)
+	handler := handler.NewUserHandler(userService)
 
 	if len(s.Config.AllowedOrigins) > 0 {
 		corsConfig := middleware.CORSConfig{

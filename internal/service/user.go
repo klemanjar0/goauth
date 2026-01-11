@@ -2,14 +2,15 @@ package service
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
-	"errors"
-	"net/netip"
-	"time"
 
-	"goauth/internal/failure"
+	"goauth/internal/auth"
+	"goauth/internal/kafka"
 	"goauth/internal/store"
+	"goauth/internal/store/pg/repository"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
+
 	authenticateuserusecase "goauth/internal/usecase/authenticate_user_use_case"
 	getuserbyemailusecase "goauth/internal/usecase/get_user_by_email_use_case"
 	getuserbyidusecase "goauth/internal/usecase/get_user_by_id_use_case"
@@ -18,46 +19,26 @@ import (
 	logoutusecase "goauth/internal/usecase/logout_use_case"
 	refreshaccesstokenusecase "goauth/internal/usecase/refresh_access_token_use_case"
 	registerusecase "goauth/internal/usecase/register_use_case"
+	resetpasswordusecase "goauth/internal/usecase/reset_password_use_case"
+	sendpasswordresetemailusecase "goauth/internal/usecase/send_password_reset_email_use_case"
+	sendverificationemailusecase "goauth/internal/usecase/send_verification_email_use_case"
 	verifyaccesstokenusecase "goauth/internal/usecase/verify_access_token_use_case"
-	"goauth/internal/utility"
-
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/redis/go-redis/v9"
-
-	"goauth/internal/auth"
-	"goauth/internal/logger"
-	"goauth/internal/store/pg/repository"
+	verifyemailusecase "goauth/internal/usecase/verify_email_use_case"
 )
 
 type UserService struct {
-	store        *store.Store
-	redis        *redis.Client
-	hasher       *auth.PasswordHasher
-	emailService *EmailService
+	store    *store.Store
+	redis    *redis.Client
+	hasher   *auth.PasswordHasher
+	producer *kafka.Producer
 }
 
-type VerifyTokenResponse struct {
-	Valid       bool
-	UserID      pgtype.UUID
-	Email       string
-	Permissions int64
-	ExpiresAt   time.Time
-}
-
-type ResetPasswordPayload struct {
-	Token       string
-	NewPassword string
-	IP          string
-	UserAgent   string
-}
-
-func NewUserService(store *store.Store, redisClient *redis.Client, emailService *EmailService) *UserService {
+func NewUserService(store *store.Store, redisClient *redis.Client, producer *kafka.Producer) *UserService {
 	return &UserService{
-		store:        store,
-		redis:        redisClient,
-		hasher:       auth.NewPasswordHasher(),
-		emailService: emailService,
+		store:    store,
+		redis:    redisClient,
+		hasher:   auth.NewPasswordHasher(),
+		producer: producer,
 	}
 }
 
@@ -153,282 +134,34 @@ func (s *UserService) LogoutUser(ctx context.Context, accessToken string, userID
 	).Execute()
 }
 
-func (s *UserService) createAuditLog(ctx context.Context, userID pgtype.UUID, eventType, ip, userAgent string, payload map[string]any) error {
-	params := repository.CreateAuditLogParams{
-		EventType: eventType,
-	}
-
-	if userID.Valid {
-		params.UserID = userID
-	}
-
-	if ip != "" {
-		addr, err := netip.ParseAddr(ip)
-		if err == nil {
-			params.Ip = &addr
-		}
-	}
-
-	if userAgent != "" {
-		params.Ua = pgtype.Text{String: userAgent, Valid: true}
-	}
-
-	if payload != nil {
-		jsonBytes, err := json.Marshal(payload)
-		if err == nil {
-			params.Payload = jsonBytes
-		}
-	}
-
-	_, err := s.store.Queries.CreateAuditLog(ctx, params)
-	return err
-}
-
 func (s *UserService) SendVerificationEmail(ctx context.Context, user *registerusecase.Response) error {
-	token := uuid.New().String()
-	params := repository.CreateEmailVerificationTokenParams{
-		UserID:    user.UserID,
-		TokenHash: auth.HashToken256(token),
-		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}
-
-	_, err := s.store.Queries.CreateEmailVerificationToken(ctx, params)
-	if err != nil {
-		logger.Error().
-			Str("email", user.Email).
-			Err(err).
-			Msg("failed to create email verification token")
-		return err
-	}
-
-	if err := s.emailService.EnqueueVerificationEmail(ctx, user.Email, token); err != nil {
-		logger.Error().
-			Err(err).
-			Str("email", user.Email).
-			Msg("failed to enqueue verification email")
-		return err
-	}
-
-	logger.Info().
-		Str("email", user.Email).
-		Str("user_id", user.UserID.String()).
-		Msg("verification email queued")
-
-	return nil
+	return sendverificationemailusecase.New(
+		ctx,
+		&sendverificationemailusecase.Params{Store: s.store, Producer: s.producer},
+		&sendverificationemailusecase.Payload{User: user},
+	).Execute()
 }
 
 func (s *UserService) SendPasswordResetEmail(ctx context.Context, email string) error {
-	var user *repository.User
-	var err error
-	user, err = s.GetUserByEmail(ctx, email)
-
-	if err != nil || user == nil {
-		logger.Warn().Str("email", email).Msg("password reset requested for non-existent email")
-		return nil
-	}
-
-	if !user.IsActive.Bool {
-		logger.Warn().Msg("user inactive")
-		return nil
-	}
-
-	token := uuid.New().String()
-	params := repository.CreatePasswordResetTokenParams{
-		UserID:    user.ID,
-		TokenHash: auth.HashToken256(token),
-		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}
-
-	_, err = s.store.Queries.CreatePasswordResetToken(ctx, params)
-
-	if err != nil {
-		logger.Error().
-			Str("email", user.Email).
-			Err(err).
-			Msg("failed to create password reset token on db")
-		return err
-	}
-
-	if err := s.emailService.EnqueuePasswordResetEmail(ctx, user.Email, token); err != nil {
-		logger.Error().
-			Err(err).
-			Str("email", user.Email).
-			Msg("failed to enqueue password reset email")
-		return err
-	}
-
-	logger.Info().
-		Str("email", user.Email).
-		Msg("password reset email queued")
-
-	return nil
+	return sendpasswordresetemailusecase.New(
+		ctx,
+		&sendpasswordresetemailusecase.Params{Store: s.store, Producer: s.producer},
+		&sendpasswordresetemailusecase.Payload{Email: email},
+	).Execute()
 }
 
-func (s *UserService) ResetPassword(ctx context.Context, payload ResetPasswordPayload) error {
-	var user *repository.User
-	var err error
-
-	tokenHash := auth.HashToken256(payload.Token)
-
-	var token repository.PasswordResetToken
-	token, err = s.store.Queries.GetPasswordResetTokenByHash(ctx, tokenHash)
-
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Msg("token is not found")
-		return failure.ErrTokenInvalid
-	}
-
-	user, err = s.GetUserByIDWithCache(ctx, token.UserID)
-
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("uuid", token.UserID.String()).
-			Msg("failed to get user data with token")
-		return failure.ErrDatabaseError
-	}
-
-	if err := utility.ValidatePassword(payload.NewPassword); err != nil {
-		logger.Warn().
-			Str("email", user.Email).
-			Err(err).
-			Msg("weak password during registration")
-		return failure.ErrPasswordTooWeak
-	}
-
-	passwordHash, err := s.hasher.HashPassword(payload.NewPassword)
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("email", user.Email).
-			Msg("failed to hash password")
-		return failure.ErrPasswordHashError
-	}
-
-	err = s.store.ExecTx(ctx, func(tx *repository.Queries) error {
-		_, updateErr :=
-			tx.UpdateUserPassword(ctx, repository.UpdateUserPasswordParams{
-				ID:           user.ID,
-				PasswordHash: passwordHash,
-			})
-
-		if updateErr != nil {
-			logger.Error().
-				Err(updateErr).
-				Msg("failed to update password")
-			return updateErr
-		}
-
-		invErr := tx.MarkPasswordResetTokenUsed(ctx, token.ID)
-
-		if invErr != nil {
-			logger.Error().
-				Err(invErr).
-				Msg("failed to invalidate token")
-
-			return invErr
-		}
-
-		if err := tx.RevokeAllUserTokens(ctx, user.ID); err != nil {
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("email", user.Email).
-			Msg("password change transaction failed")
-		return failure.ErrPasswordReset
-	}
-
-	s.InvalidateUserCache(ctx, user.ID)
-
-	err = s.createAuditLog(ctx, user.ID, "user_password_reset", payload.IP, payload.UserAgent, map[string]any{
-		"reason": "user_initiated",
-	})
-
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Msg("createAuditLog failed")
-	}
-
-	return nil
+func (s *UserService) ResetPassword(ctx context.Context, payload resetpasswordusecase.Payload) error {
+	return resetpasswordusecase.New(
+		ctx,
+		&resetpasswordusecase.Params{Store: s.store, Redis: s.redis, Hasher: s.hasher},
+		&payload,
+	).Execute()
 }
 
 func (s *UserService) VerifyEmail(ctx context.Context, token string) error {
-	if token == "" {
-		return failure.ErrInvalidToken
-	}
-
-	tokenHash := auth.HashToken256(token)
-	verificationToken, err := s.store.Queries.GetEmailVerificationTokenByHash(ctx, tokenHash)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			logger.Warn().
-				Str("token", token).
-				Msg("email verification token not found or expired")
-			return failure.ErrInvalidToken
-		}
-		logger.Error().
-			Err(err).
-			Msg("database error while fetching email verification token")
-		return failure.ErrDatabaseError
-	}
-
-	err = s.store.ExecTx(ctx, func(tx *repository.Queries) error {
-		if err := tx.MarkEmailVerificationTokenUsed(ctx, verificationToken.ID); err != nil {
-			logger.Error().
-				Err(err).
-				Str("token_id", verificationToken.ID.String()).
-				Msg("failed to mark email verification token as used")
-			return failure.ErrDatabaseError
-		}
-
-		_, updateErr := tx.UpdateUser(ctx, repository.UpdateUserParams{
-			ID:             verificationToken.UserID,
-			EmailConfirmed: pgtype.Bool{Bool: true, Valid: true},
-		})
-		if updateErr != nil {
-			logger.Error().
-				Err(updateErr).
-				Str("user_id", verificationToken.UserID.String()).
-				Msg("failed to update user email_confirmed status")
-			return failure.ErrDatabaseError
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", verificationToken.UserID.String()).
-			Msg("email verification transaction failed")
-		return failure.ErrDatabaseError
-	}
-
-	s.InvalidateUserCache(ctx, verificationToken.UserID)
-
-	// Create audit log for email verification
-	err = s.createAuditLog(ctx, verificationToken.UserID, "email_verified", "", "", map[string]any{
-		"token_id": verificationToken.ID.String(),
-	})
-	if err != nil {
-		logger.Warn().
-			Err(err).
-			Str("user_id", verificationToken.UserID.String()).
-			Msg("failed to create audit log for email verification")
-	}
-
-	logger.Info().
-		Str("user_id", verificationToken.UserID.String()).
-		Msg("email verified successfully")
-
-	return nil
+	return verifyemailusecase.New(
+		ctx,
+		&verifyemailusecase.Params{Store: s.store, Redis: s.redis},
+		&verifyemailusecase.Payload{Token: token},
+	).Execute()
 }

@@ -13,8 +13,8 @@ import (
 	"goauth/internal/kafka"
 	"goauth/internal/logger"
 	"goauth/internal/server"
-	"goauth/internal/service"
 	"goauth/internal/store"
+	handleemailmessageusecase "goauth/internal/usecase/handle_email_message_use_case"
 )
 
 func main() {
@@ -33,17 +33,11 @@ func main() {
 	brokers := cfg.KafkaBrokers
 	producer := kafka.NewProducer(kafka.ProducerConfig{
 		Brokers: brokers,
-		Topic:   service.EmailTopic,
+		Topic:   kafka.EmailTopic,
 	})
 	defer producer.Close()
 
-	emailService := service.NewEmailService(producer)
-
-	kafkaServices := &server.KafkaServices{
-		EmailService: emailService,
-	}
-
-	s := server.New(db, cfg, redisClient, kafkaServices)
+	s := server.New(db, cfg, redisClient, producer)
 
 	var wg sync.WaitGroup
 
@@ -52,9 +46,20 @@ func main() {
 	for i := range numConsumers {
 		consumer := kafka.NewConsumer(kafka.ConsumerConfig{
 			Brokers: brokers,
-			Topic:   service.EmailTopic,
+			Topic:   kafka.EmailTopic,
 			GroupID: "email-workers",
-			Handler: service.HandleEmailMessage,
+			Handler: func(ctx context.Context, key, value []byte) error {
+				return handleemailmessageusecase.
+					New(
+						ctx,
+						&handleemailmessageusecase.Params{},
+						&handleemailmessageusecase.Payload{
+							Key:   key,
+							Value: value,
+						},
+					).
+					Execute()
+			},
 		})
 		consumers[i] = consumer
 

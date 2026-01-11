@@ -15,6 +15,7 @@ import (
 	loginusecase "goauth/internal/usecase/login_use_case"
 	refreshaccesstokenusecase "goauth/internal/usecase/refresh_access_token_use_case"
 	registerusecase "goauth/internal/usecase/register_use_case"
+	resetpasswordusecase "goauth/internal/usecase/reset_password_use_case"
 	verifyaccesstokenusecase "goauth/internal/usecase/verify_access_token_use_case"
 	"goauth/internal/utility"
 )
@@ -840,7 +841,7 @@ func (h *UserHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	if err := h.userService.ResetPassword(ctx, service.ResetPasswordPayload{
+	if err := h.userService.ResetPassword(ctx, resetpasswordusecase.Payload{
 		Token:       req.Token,
 		NewPassword: req.NewPassword,
 		IP:          clientIP,
