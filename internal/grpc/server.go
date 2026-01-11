@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"goauth/internal/config"
 	"goauth/internal/grpc/handler"
-	"goauth/internal/service"
 	"goauth/internal/store"
 	"goauth/pkg/authpb"
 	"net"
@@ -26,7 +25,7 @@ type Server struct {
 	authHandler *handler.AuthHandler
 }
 
-func NewServer(cfg *config.Config, userService *service.UserService, redisClient *store.RedisClient) (*Server, error) {
+func NewServer(cfg *config.Config, store *store.Store, redisClient *store.RedisClient) (*Server, error) {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", cfg.GRPCConfig.Port))
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen: %w", err)
@@ -89,7 +88,7 @@ func NewServer(cfg *config.Config, userService *service.UserService, redisClient
 
 	grpcServer := grpc.NewServer(serverOpts...)
 
-	authHandler := handler.NewAuthHandler(userService)
+	authHandler := handler.NewAuthHandler(store, redisClient.Client)
 	authpb.RegisterAuthServiceServer(grpcServer, authHandler)
 
 	healthServer := health.NewServer()

@@ -61,7 +61,7 @@ func New(
 		KafkaServices:  kServices,
 		Config:         c,
 		Services:       services,
-		GrpcInstance:   initGrpc(c, services, redis),
+		GrpcInstance:   initGrpc(c, store, redis),
 	}
 
 	s.initRoutes()
@@ -83,10 +83,10 @@ func initServices(
 
 func initGrpc(
 	config *config.Config,
-	services *Services,
+	store *store.Store,
 	redis *store.RedisClient,
 ) *grpc.Server {
-	grpcServer, err := grpc.NewServer(config, services.UserService, redis)
+	grpcServer, err := grpc.NewServer(config, store, redis)
 
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to create grpc server")

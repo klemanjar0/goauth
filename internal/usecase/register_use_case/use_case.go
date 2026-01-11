@@ -12,6 +12,7 @@ import (
 	createauditlogusecase "goauth/internal/usecase/create_audit_log_use_case"
 	"goauth/internal/utility"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -22,36 +23,50 @@ const (
 	defaultPermissions = 0 // No special permissions by default
 )
 
-type RegisterUseCase struct {
-	store                 *store.Store
-	redisClient           *redis.Client
-	hasher                *auth.PasswordHasher
-	createAuditLogUseCase *createauditlogusecase.CreateAuditLogUseCase
+type Params struct {
+	Store       *store.Store
+	RedisClient *redis.Client
+	Hasher      *auth.PasswordHasher
+}
 
-	payload *RequestPayload
-	ctx     context.Context
+type Payload struct {
+	Email       string
+	Password    string
+	Permissions int64
+	IP          string
+	UserAgent   string
+}
+
+type Response struct {
+	UserID         pgtype.UUID
+	Email          string
+	Permissions    int64
+	IsActive       bool
+	EmailConfirmed bool
+	CreatedAt      time.Time
+}
+
+type RegisterUseCase struct {
+	*Params
+	*Payload
+
+	ctx context.Context
 }
 
 func New(
 	ctx context.Context,
-	params Params,
+	params *Params,
+	payload *Payload,
 ) *RegisterUseCase {
 	return &RegisterUseCase{
-		store:                 params.Store,
-		redisClient:           params.RedisClient,
-		hasher:                auth.NewPasswordHasher(),
-		ctx:                   ctx,
-		createAuditLogUseCase: params.CreateAuditLogUseCase,
+		Params:  params,
+		Payload: payload,
+		ctx:     ctx,
 	}
 }
 
-func (u *RegisterUseCase) WithPayload(payload *RequestPayload) *RegisterUseCase {
-	u.payload = payload
-	return u
-}
-
 func (u *RegisterUseCase) Execute() (*Response, error) {
-	req := u.payload
+	req := u.Payload
 	ctx := u.ctx
 
 	if err := utility.ValidateEmail(req.Email); err != nil {
@@ -72,13 +87,15 @@ func (u *RegisterUseCase) Execute() (*Response, error) {
 		return nil, err
 	}
 
-	existingUser, err := u.store.Queries.GetUserByEmail(ctx, email)
+	existingUser, err := u.Store.Queries.GetUserByEmail(ctx, email)
 	if err == nil && existingUser.ID.Valid {
 		logger.Warn().
 			Str("email", email).
 			Msg("attempted registration with existing email")
 
-		_ = u.createAuditLogUseCase.WithPayload(&createauditlogusecase.RequestPayload{
+		_ = createauditlogusecase.New(ctx, &createauditlogusecase.Params{
+			Store: u.Store,
+		}, &createauditlogusecase.Payload{
 			UserID:    pgtype.UUID{Valid: false},
 			EventType: "registration_failed_duplicate",
 			Ip:        req.IP,
@@ -99,7 +116,7 @@ func (u *RegisterUseCase) Execute() (*Response, error) {
 		return nil, failure.ErrDatabaseError
 	}
 
-	passwordHash, err := u.hasher.HashPassword(req.Password)
+	passwordHash, err := u.Hasher.HashPassword(req.Password)
 	if err != nil {
 		logger.Error().
 			Err(err).
@@ -113,7 +130,7 @@ func (u *RegisterUseCase) Execute() (*Response, error) {
 		permissions = defaultPermissions
 	}
 
-	user, err := u.store.Queries.CreateUser(ctx, repository.CreateUserParams{
+	user, err := u.Store.Queries.CreateUser(ctx, repository.CreateUserParams{
 		Email:        email,
 		PasswordHash: passwordHash,
 		Permissions:  permissions,
@@ -131,7 +148,9 @@ func (u *RegisterUseCase) Execute() (*Response, error) {
 		return nil, failure.ErrDatabaseError
 	}
 
-	err = u.createAuditLogUseCase.WithPayload(&createauditlogusecase.RequestPayload{
+	err = createauditlogusecase.New(ctx, &createauditlogusecase.Params{
+		Store: u.Store,
+	}, &createauditlogusecase.Payload{
 		UserID:    user.ID,
 		EventType: "user_registered",
 		Ip:        req.IP,

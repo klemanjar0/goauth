@@ -11,7 +11,9 @@ import (
 
 	"goauth/internal/failure"
 	"goauth/internal/store"
-	createauditlogusecase "goauth/internal/usecase/create_audit_log_use_case"
+	getuserbyemailusecase "goauth/internal/usecase/get_user_by_email_use_case"
+	getuserbyidusecase "goauth/internal/usecase/get_user_by_id_use_case"
+	invalidateusercacheusecase "goauth/internal/usecase/invalidate_user_cache_use_case"
 	registerusecase "goauth/internal/usecase/register_use_case"
 	"goauth/internal/utility"
 
@@ -89,95 +91,42 @@ func NewUserService(store *store.Store, redisClient *redis.Client, emailService 
 
 func (s *UserService) RegisterUser(
 	ctx context.Context,
-	req registerusecase.RequestPayload,
+	req registerusecase.Payload,
 ) (*registerusecase.Response, error) {
-	audit := createauditlogusecase.New(ctx, createauditlogusecase.Params{
-		Store: s.store,
-	})
-
-	usecase := registerusecase.New(ctx, registerusecase.Params{
-		Store:                 s.store,
-		RedisClient:           s.redis,
-		CreateAuditLogUseCase: audit,
-	}).WithPayload(&req)
-	return usecase.Execute()
-}
-
-func (s *UserService) GetUserByID(ctx context.Context, userID pgtype.UUID) (*repository.User, error) {
-	user, err := s.store.Queries.GetUserByID(ctx, userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, failure.ErrUserNotFound
-		}
-		logger.Error().
-			Err(err).
-			Str("user_id", userID.String()).
-			Msg("database error while fetching user")
-		return nil, failure.ErrDatabaseError
-	}
-	return &user, nil
+	return registerusecase.New(
+		ctx,
+		&registerusecase.Params{
+			Store:       s.store,
+			RedisClient: s.redis,
+			Hasher:      auth.NewPasswordHasher(),
+		},
+		&req,
+	).Execute()
 }
 
 func (s *UserService) GetUserByIDWithCache(ctx context.Context, userID pgtype.UUID) (*repository.User, error) {
-	cacheKey := "user:" + userID.String()
-
-	cachedData, err := s.redis.Get(ctx, cacheKey).Result()
-	if err == nil && cachedData != "" {
-		var user repository.User
-		if err := json.Unmarshal([]byte(cachedData), &user); err == nil {
-			logger.Debug().
-				Str("user_id", userID.String()).
-				Msg("user fetched from cache")
-			return &user, nil
-		}
-	}
-
-	user, err := s.GetUserByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	userData, err := json.Marshal(user)
-	if err == nil {
-		err = s.redis.Set(ctx, cacheKey, userData, 5*time.Minute).Err()
-		if err != nil {
-			logger.Warn().
-				Err(err).
-				Str("user_id", userID.String()).
-				Msg("failed to cache user data in redis")
-			// continue anyway - cache failure is not critical
-		}
-	}
-
-	return user, nil
+	return getuserbyidusecase.New(ctx, &getuserbyidusecase.Params{
+		Store: s.store,
+		Redis: s.redis,
+	}, &getuserbyidusecase.Payload{UserID: userID}).Execute()
 }
 
 func (s *UserService) InvalidateUserCache(ctx context.Context, userID pgtype.UUID) {
-	cacheKey := "user:" + userID.String()
-	err := s.redis.Del(ctx, cacheKey).Err()
-	if err != nil {
-		logger.Warn().
-			Err(err).
-			Str("user_id", userID.String()).
-			Msg("failed to invalidate user cache")
-	}
+	invalidateusercacheusecase.
+		New(ctx,
+			&invalidateusercacheusecase.Params{
+				Redis: s.redis,
+			},
+			&invalidateusercacheusecase.Payload{
+				UserID: userID,
+			}).
+		Execute()
 }
 
 func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*repository.User, error) {
-	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
-
-	user, err := s.store.Queries.GetUserByEmail(ctx, normalizedEmail)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, failure.ErrUserNotFound
-		}
-		logger.Error().
-			Err(err).
-			Str("email", normalizedEmail).
-			Msg("database error while fetching user")
-		return nil, failure.ErrDatabaseError
-	}
-	return &user, nil
+	return getuserbyemailusecase.
+		New(ctx, &getuserbyemailusecase.Params{Store: s.store}, &getuserbyemailusecase.Payload{Email: email}).
+		Execute()
 }
 
 func (s *UserService) AuthenticateUser(ctx context.Context, email, password string) (*repository.User, error) {

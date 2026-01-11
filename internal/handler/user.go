@@ -75,7 +75,7 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	result, err := u.userService.RegisterUser(ctx, registerusecase.RequestPayload{
+	result, err := u.userService.RegisterUser(ctx, registerusecase.Payload{
 		Email:       req.Email,
 		Password:    req.Password,
 		Permissions: 0,

@@ -3,11 +3,14 @@ package handler
 import (
 	"context"
 	"goauth/internal/constants"
-	"goauth/internal/service"
+	"goauth/internal/store"
+	getuserbyidusecase "goauth/internal/usecase/get_user_by_id_use_case"
+	verifyaccesstokenusecase "goauth/internal/usecase/verify_access_token_use_case"
 	"goauth/pkg/authpb"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -16,12 +19,17 @@ import (
 
 type AuthHandler struct {
 	authpb.UnimplementedAuthServiceServer
-	userService *service.UserService
+	store *store.Store
+	redis *redis.Client
 }
 
-func NewAuthHandler(userService *service.UserService) *AuthHandler {
+func NewAuthHandler(
+	store *store.Store,
+	redis *redis.Client,
+) *AuthHandler {
 	return &AuthHandler{
-		userService: userService,
+		store: store,
+		redis: redis,
 	}
 }
 
@@ -30,7 +38,16 @@ func (h *AuthHandler) ValidateToken(ctx context.Context, req *authpb.ValidateTok
 		return nil, status.Error(codes.InvalidArgument, "token is required")
 	}
 
-	claims, err := h.userService.VerifyAccessToken(ctx, req.Token)
+	claims, err := verifyaccesstokenusecase.New(ctx,
+		&verifyaccesstokenusecase.Params{
+			Store: h.store,
+			Redis: h.redis,
+		},
+		&verifyaccesstokenusecase.Payload{
+			Token: req.Token,
+		},
+	).Execute()
+
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
 	}
@@ -48,12 +65,25 @@ func (h *AuthHandler) GetUserFromToken(ctx context.Context, req *authpb.GetUserF
 		return nil, status.Error(codes.InvalidArgument, "token is required")
 	}
 
-	claims, err := h.userService.VerifyAccessToken(ctx, req.Token)
+	claims, err := verifyaccesstokenusecase.New(ctx,
+		&verifyaccesstokenusecase.Params{
+			Store: h.store,
+			Redis: h.redis,
+		},
+		&verifyaccesstokenusecase.Payload{
+			Token: req.Token,
+		},
+	).Execute()
+
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
 	}
 
-	user, err := h.userService.GetUserByID(ctx, claims.UserID)
+	user, err := getuserbyidusecase.New(ctx, &getuserbyidusecase.Params{
+		Store: h.store,
+		Redis: h.redis,
+	}, &getuserbyidusecase.Payload{UserID: claims.UserID}).Execute()
+
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "user not found")
 	}
@@ -78,7 +108,16 @@ func (h *AuthHandler) CheckPermission(ctx context.Context, req *authpb.CheckPerm
 		return nil, status.Error(codes.InvalidArgument, "required_permission is required")
 	}
 
-	claims, err := h.userService.VerifyAccessToken(ctx, req.Token)
+	claims, err := verifyaccesstokenusecase.New(ctx,
+		&verifyaccesstokenusecase.Params{
+			Store: h.store,
+			Redis: h.redis,
+		},
+		&verifyaccesstokenusecase.Payload{
+			Token: req.Token,
+		},
+	).Execute()
+
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
 	}

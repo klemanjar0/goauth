@@ -8,35 +8,39 @@ import (
 	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/redis/go-redis/v9"
 )
 
-type CreateAuditLogUseCase struct {
-	store       *store.Store
-	redisClient *redis.Client
+type Params struct {
+	Store *store.Store
+}
 
-	payload *RequestPayload
-	ctx     context.Context
+type Payload struct {
+	UserID                   pgtype.UUID
+	EventType, Ip, UserAgent string
+	Payload                  map[string]any
+}
+
+type CreateAuditLogUseCase struct {
+	*Params
+	*Payload
+	ctx context.Context
 }
 
 func New(
 	ctx context.Context,
-	params Params,
+	params *Params,
+	payload *Payload,
 ) *CreateAuditLogUseCase {
 	return &CreateAuditLogUseCase{
-		store: params.Store,
-		ctx:   ctx,
+		Params:  params,
+		ctx:     ctx,
+		Payload: payload,
 	}
 }
 
-func (u *CreateAuditLogUseCase) WithPayload(payload *RequestPayload) *CreateAuditLogUseCase {
-	u.payload = payload
-	return u
-}
-
 func (u *CreateAuditLogUseCase) Execute() error {
-	userID, eventType, ip, userAgent := u.payload.UserID, u.payload.EventType, u.payload.Ip, u.payload.UserAgent
-	payload := u.payload.Payload
+	userID, eventType, ip, userAgent := u.Payload.UserID, u.Payload.EventType, u.Payload.Ip, u.Payload.UserAgent
+	payload := u.Payload.Payload
 
 	params := repository.CreateAuditLogParams{
 		EventType: eventType,
@@ -64,6 +68,6 @@ func (u *CreateAuditLogUseCase) Execute() error {
 		}
 	}
 
-	_, err := u.store.Queries.CreateAuditLog(u.ctx, params)
+	_, err := u.Store.Queries.CreateAuditLog(u.ctx, params)
 	return err
 }
