@@ -11,6 +11,7 @@ import (
 
 	"goauth/internal/failure"
 	"goauth/internal/store"
+	authenticateuserusecase "goauth/internal/usecase/authenticate_user_use_case"
 	getuserbyemailusecase "goauth/internal/usecase/get_user_by_email_use_case"
 	getuserbyidusecase "goauth/internal/usecase/get_user_by_id_use_case"
 	invalidateusercacheusecase "goauth/internal/usecase/invalidate_user_cache_use_case"
@@ -98,7 +99,7 @@ func (s *UserService) RegisterUser(
 		&registerusecase.Params{
 			Store:       s.store,
 			RedisClient: s.redis,
-			Hasher:      auth.NewPasswordHasher(),
+			Hasher:      s.hasher,
 		},
 		&req,
 	).Execute()
@@ -130,46 +131,12 @@ func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*reposi
 }
 
 func (s *UserService) AuthenticateUser(ctx context.Context, email, password string) (*repository.User, error) {
-	user, err := s.GetUserByEmail(ctx, email)
-
-	var dummyHash string
-	if err != nil {
-		dummyHash = "$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$somehashvalue"
-	} else {
-		dummyHash = user.PasswordHash
-	}
-
-	valid, hashErr := s.hasher.VerifyPassword(password, dummyHash)
-
-	if err != nil {
-		if errors.Is(err, failure.ErrUserNotFound) {
-			return nil, failure.ErrInvalidCredentials
-		}
-		return nil, err
-	}
-
-	if hashErr != nil {
-		logger.Error().Err(hashErr).Msg("error verifying password")
-		return nil, failure.ErrDatabaseError
-	}
-
-	if !user.IsActive.Bool {
-		return nil, failure.ErrUserInactive
-	}
-
-	if !valid {
-		return nil, failure.ErrInvalidCredentials
-	}
-
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("error verifying password")
-		return nil, failure.ErrDatabaseError
-	}
-
-	return user, nil
+	return authenticateuserusecase.
+		New(ctx,
+			&authenticateuserusecase.Params{Store: s.store, Redis: s.redis, Hasher: s.hasher},
+			&authenticateuserusecase.Payload{Email: email, Password: password},
+		).
+		Execute()
 }
 
 func (s *UserService) LoginUser(ctx context.Context, req LoginRequest) (*LoginResponse, error) {
