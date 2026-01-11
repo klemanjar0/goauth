@@ -11,20 +11,17 @@ import (
 
 	"goauth/internal/failure"
 	"goauth/internal/store"
+	createauditlogusecase "goauth/internal/usecase/create_audit_log_use_case"
+	registerusecase "goauth/internal/usecase/register_use_case"
 	"goauth/internal/utility"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"goauth/internal/auth"
 	"goauth/internal/logger"
 	"goauth/internal/store/pg/repository"
-)
-
-const (
-	defaultPermissions = 0 // No special permissions by default
 )
 
 type UserService struct {
@@ -66,23 +63,6 @@ type LoginRequest struct {
 	UserAgent  string
 }
 
-type RegisterUserRequest struct {
-	Email       string
-	Password    string
-	Permissions int64
-	IP          string // For audit logging
-	UserAgent   string // For audit logging
-}
-
-type RegisterUserResponse struct {
-	UserID         pgtype.UUID
-	Email          string
-	Permissions    int64
-	IsActive       bool
-	EmailConfirmed bool
-	CreatedAt      time.Time
-}
-
 type VerifyTokenResponse struct {
 	Valid       bool
 	UserID      pgtype.UUID
@@ -107,102 +87,20 @@ func NewUserService(store *store.Store, redisClient *redis.Client, emailService 
 	}
 }
 
-func (s *UserService) RegisterUser(ctx context.Context, req RegisterUserRequest) (*RegisterUserResponse, error) {
-	if err := utility.ValidateEmail(req.Email); err != nil {
-		logger.Warn().
-			Str("email", req.Email).
-			Err(err).
-			Msg("invalid email format during registration")
-		return nil, err
-	}
-
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-
-	if err := utility.ValidatePassword(req.Password); err != nil {
-		logger.Warn().
-			Str("email", email).
-			Err(err).
-			Msg("weak password during registration")
-		return nil, err
-	}
-
-	existingUser, err := s.store.Queries.GetUserByEmail(ctx, email)
-	if err == nil && existingUser.ID.Valid {
-		logger.Warn().
-			Str("email", email).
-			Msg("attempted registration with existing email")
-
-		_ = s.createAuditLog(ctx, pgtype.UUID{Valid: false}, "registration_failed_duplicate", req.IP, req.UserAgent, map[string]any{
-			"email":  email,
-			"reason": "duplicate_email",
-		})
-
-		return nil, failure.ErrUserAlreadyExists
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		logger.Error().
-			Err(err).
-			Str("email", email).
-			Msg("database error while checking existing user")
-		return nil, failure.ErrDatabaseError
-	}
-
-	passwordHash, err := s.hasher.HashPassword(req.Password)
-	if err != nil {
-		logger.Error().
-			Err(err).
-			Str("email", email).
-			Msg("failed to hash password")
-		return nil, failure.ErrPasswordHashError
-	}
-
-	permissions := req.Permissions
-	if permissions == 0 {
-		permissions = defaultPermissions
-	}
-
-	user, err := s.store.Queries.CreateUser(ctx, repository.CreateUserParams{
-		Email:        email,
-		PasswordHash: passwordHash,
-		Permissions:  permissions,
+func (s *UserService) RegisterUser(
+	ctx context.Context,
+	req registerusecase.RequestPayload,
+) (*registerusecase.Response, error) {
+	audit := createauditlogusecase.New(ctx, createauditlogusecase.Params{
+		Store: s.store,
 	})
-	if err != nil {
-		if isUniqueViolation(err) {
-			logger.Warn().Str("email", email).Msg("duplicate registration attempt")
-			return nil, failure.ErrUserAlreadyExists
-		}
 
-		logger.Error().
-			Err(err).
-			Str("email", email).
-			Msg("failed to create user in database")
-		return nil, failure.ErrDatabaseError
-	}
-
-	err = s.createAuditLog(ctx, user.ID, "user_registered", req.IP, req.UserAgent, map[string]any{
-		"email":       email,
-		"permissions": permissions,
-	})
-	if err != nil {
-		logger.Warn().
-			Err(err).
-			Str("user_id", user.ID.String()).
-			Msg("failed to create audit log for registration")
-	}
-
-	logger.Info().
-		Str("user_id", user.ID.String()).
-		Str("email", email).
-		Msg("user registered successfully")
-
-	return &RegisterUserResponse{
-		UserID:         user.ID,
-		Email:          user.Email,
-		Permissions:    user.Permissions,
-		IsActive:       user.IsActive.Bool,
-		EmailConfirmed: user.EmailConfirmed.Bool,
-		CreatedAt:      user.CreatedAt.Time,
-	}, nil
+	usecase := registerusecase.New(ctx, registerusecase.Params{
+		Store:                 s.store,
+		RedisClient:           s.redis,
+		CreateAuditLogUseCase: audit,
+	}).WithPayload(&req)
+	return usecase.Execute()
 }
 
 func (s *UserService) GetUserByID(ctx context.Context, userID pgtype.UUID) (*repository.User, error) {
@@ -679,7 +577,7 @@ func (s *UserService) createAuditLog(ctx context.Context, userID pgtype.UUID, ev
 	return err
 }
 
-func (s *UserService) SendVerificationEmail(ctx context.Context, user *RegisterUserResponse) error {
+func (s *UserService) SendVerificationEmail(ctx context.Context, user *registerusecase.Response) error {
 	token := uuid.New().String()
 	params := repository.CreateEmailVerificationTokenParams{
 		UserID:    user.UserID,
@@ -958,13 +856,4 @@ func (s *UserService) isAccountLocked(ctx context.Context, email string) bool {
 func (s *UserService) resetFailedLogins(ctx context.Context, email string) {
 	key := "failed_login:" + email
 	s.redis.Del(ctx, key)
-}
-
-func isUniqueViolation(err error) bool {
-	// Check for PostgreSQL unique constraint violation (error code 23505)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505"
-	}
-	return false
 }

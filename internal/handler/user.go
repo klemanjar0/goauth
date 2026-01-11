@@ -12,6 +12,7 @@ import (
 	"goauth/internal/failure"
 	"goauth/internal/logger"
 	"goauth/internal/service"
+	registerusecase "goauth/internal/usecase/register_use_case"
 	"goauth/internal/utility"
 )
 
@@ -74,7 +75,7 @@ func (u *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), REQUEST_CTX_TIMEOUT)
 	defer cancel()
 
-	result, err := u.userService.RegisterUser(ctx, service.RegisterUserRequest{
+	result, err := u.userService.RegisterUser(ctx, registerusecase.RequestPayload{
 		Email:       req.Email,
 		Password:    req.Password,
 		Permissions: 0,
