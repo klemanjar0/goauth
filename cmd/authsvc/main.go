@@ -21,8 +21,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// # DEVELOPMENT MODE SHOULD BE SET MANUALLY #
+	logger.Init(true)
+
 	cfg := config.Load()
-	logger.Init(cfg.IsDevelopment)
 	logger.Info().Msg("logger ready for use")
 	db := store.InitializeDB(ctx, cfg)
 	defer db.Close()
