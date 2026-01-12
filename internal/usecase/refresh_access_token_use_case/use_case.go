@@ -101,19 +101,11 @@ func (u *RefreshAccessTokenUseCase) Execute() (*Response, error) {
 	var accessExpiresIn, refreshExpiresIn int64
 
 	err = u.Store.ExecTx(u.ctx, func(tx *repository.Queries) error {
-		dbToken, err := tx.GetRefreshTokenForUpdate(u.ctx, refreshTokenID)
-		if err != nil {
-			return err
-		}
-
-		if dbToken.LastUsedAt.Valid {
-			logger.Warn().Msg("refresh token reuse detected")
+		dbToken, err := tx.ConsumeRefreshToken(u.ctx, refreshTokenID)
+		if err == sql.ErrNoRows {
+			// token already used, reuse detected
 			_ = tx.RevokeTokenFamily(u.ctx, refreshTokenID)
 			return failure.ErrTokenRevoked
-		}
-
-		if err := tx.UpdateRefreshTokenLastUsed(u.ctx, refreshTokenID); err != nil {
-			return err
 		}
 
 		accessToken, err = auth.GenerateAccessToken(dbToken.UserID.String())

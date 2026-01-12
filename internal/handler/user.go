@@ -490,7 +490,7 @@ func (h *UserHandler) SetAuthCookies(w http.ResponseWriter, access, refresh stri
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
-		Path:     "/",
+		Path:     "/v2/refresh",
 		MaxAge:   int(refreshExpiresIn),
 	})
 }

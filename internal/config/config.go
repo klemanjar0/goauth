@@ -48,6 +48,7 @@ type Config struct {
 	GRPCConfig           GRPCConfig
 	AllowedOrigins       []string
 	PoolConfig           PoolConfig
+	CookieDomain         string
 }
 
 func Load() *Config {
@@ -131,6 +132,7 @@ func Load() *Config {
 		GRPCConfig:           grpcConfig,
 		AllowedOrigins:       allowedOrigins,
 		PoolConfig:           poolConfig,
+		CookieDomain:         getEnv(constants.COOKIE_DOMAIN, ""),
 	}
 }
 

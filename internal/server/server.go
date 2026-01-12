@@ -90,9 +90,9 @@ func (s *Server) setupRouter() {
 	s.App.Use(httprate.LimitByIP(100, time.Minute))
 
 	s.App.Route("/v1", func(r chi.Router) {
-		r.Post("/register", handler.Register)
-		r.Post("/login", handler.Login)
-		r.Post("/refresh", handler.RefreshToken)
+		r.With(httprate.LimitByIP(5, time.Minute)).Post("/register", handler.Register)
+		r.With(httprate.LimitByIP(5, time.Minute)).Post("/login", handler.Login)
+		r.With(httprate.LimitByIP(5, time.Minute)).Post("/refresh", handler.RefreshToken)
 		r.Post("/me", handler.VerifyToken)
 		r.Get("/health", handler.HealthCheck)
 		r.Post("/logout", handler.Logout)
@@ -102,7 +102,7 @@ func (s *Server) setupRouter() {
 	})
 
 	s.App.Route("/v2", func(r chi.Router) {
-		r.Post("/refresh", handler.RefreshTokenWithCookie)
+		r.With(httprate.LimitByIP(5, time.Minute)).Post("/refresh", handler.RefreshTokenWithCookie)
 		r.Post("/logout", handler.LogoutWithCookie)
 		r.Post("/me", handler.VerifyCookieToken)
 	})

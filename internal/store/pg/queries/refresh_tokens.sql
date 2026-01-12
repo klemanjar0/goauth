@@ -51,3 +51,11 @@ order by created_at desc;
 SELECT * FROM refresh_tokens
 WHERE id = $1 AND revoked = false AND expires_at > NOW()
 FOR UPDATE;
+-- name: ConsumeRefreshToken :one
+UPDATE refresh_tokens 
+SET last_used_at = NOW()
+WHERE id = $1 
+  AND last_used_at IS NULL
+  AND revoked = false 
+  AND expires_at > NOW()
+RETURNING *;

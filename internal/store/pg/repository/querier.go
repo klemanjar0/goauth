@@ -15,6 +15,7 @@ type Querier interface {
 	CleanExpiredPasswordResetTokens(ctx context.Context) error
 	CleanExpiredTokens(ctx context.Context) error
 	CleanOldAuditLogs(ctx context.Context, createdAt pgtype.Timestamptz) error
+	ConsumeRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error)
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (EmailVerificationToken, error)
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordResetToken, error)

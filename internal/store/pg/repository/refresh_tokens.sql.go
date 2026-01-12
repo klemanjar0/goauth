@@ -21,6 +21,32 @@ func (q *Queries) CleanExpiredTokens(ctx context.Context) error {
 	return err
 }
 
+const consumeRefreshToken = `-- name: ConsumeRefreshToken :one
+UPDATE refresh_tokens 
+SET last_used_at = NOW()
+WHERE id = $1 
+  AND last_used_at IS NULL
+  AND revoked = false 
+  AND expires_at > NOW()
+RETURNING id, user_id, device_info, rotated_from, revoked, created_at, expires_at, last_used_at
+`
+
+func (q *Queries) ConsumeRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error) {
+	row := q.db.QueryRow(ctx, consumeRefreshToken, id)
+	var i RefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.DeviceInfo,
+		&i.RotatedFrom,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+	)
+	return i, err
+}
+
 const createRefreshToken = `-- name: CreateRefreshToken :one
 insert into refresh_tokens (user_id, device_info, expires_at, rotated_from)
 values ($1, $2, $3, $4)

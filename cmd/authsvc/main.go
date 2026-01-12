@@ -27,7 +27,7 @@ func main() {
 	db := store.InitializeDB(ctx, cfg)
 	defer db.Close()
 
-	redisClient := store.InitRedisClient(cfg)
+	redisClient := store.InitRedisClient(ctx, cfg)
 	defer redisClient.Close()
 
 	brokers := cfg.KafkaBrokers
