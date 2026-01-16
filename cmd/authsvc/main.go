@@ -24,8 +24,8 @@ func main() {
 	// # DEVELOPMENT MODE SHOULD BE SET MANUALLY #
 	logger.Init(true)
 
-	cfg := config.Load()
-	logger.Info().Msg("logger ready for use")
+	config.Setup()
+	cfg := config.Get()
 	db := store.InitializeDB(ctx, cfg)
 	defer db.Close()
 

@@ -16,6 +16,7 @@ var (
 	ErrForcedShutdownServer   = errors.New("server forced to shutdown")
 	ErrRedisClient            = errors.New("failed to connect to redis")
 	ErrServer                 = errors.New("server internal error")
+	ErrConfigInitFailed       = errors.New("cannot access config")
 )
 
 // -- User Errors Declarations --

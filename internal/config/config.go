@@ -51,7 +51,18 @@ type Config struct {
 	CookieDomain         string
 }
 
-func Load() *Config {
+var globalConfig *Config = &Config{}
+var didInitialized bool = false
+
+func Get() *Config {
+	if !didInitialized {
+		logger.Fatal().Msg(failure.ErrConfigInitFailed.Error())
+	}
+
+	return globalConfig
+}
+
+func Setup() {
 	logger.Info().Msg("loading service configuration")
 	if err := godotenv.Load(); err != nil {
 		logger.Warn().Err(err).Msg(failure.ErrEnvironmentLocalFile.Error())
@@ -121,19 +132,17 @@ func Load() *Config {
 	// Parse allowed origins for CORS
 	allowedOrigins := parseAllowedOrigins(getEnv(constants.CORS_ALLOWED_ORIGINS, ""))
 
-	logger.Info().Msg("loading service configuration end")
+	globalConfig.IsDevelopment = isDev
+	globalConfig.Port = port
+	globalConfig.RedisConfig = redisConfig
+	globalConfig.KafkaBrokers = brokers
+	globalConfig.RunMigrationsOnStart = RunMigrationsOnStart
+	globalConfig.GRPCConfig = grpcConfig
+	globalConfig.AllowedOrigins = allowedOrigins
+	globalConfig.PoolConfig = poolConfig
+	globalConfig.CookieDomain = getEnv(constants.COOKIE_DOMAIN, "")
 
-	return &Config{
-		IsDevelopment:        isDev,
-		Port:                 port,
-		RedisConfig:          redisConfig,
-		KafkaBrokers:         brokers,
-		RunMigrationsOnStart: RunMigrationsOnStart,
-		GRPCConfig:           grpcConfig,
-		AllowedOrigins:       allowedOrigins,
-		PoolConfig:           poolConfig,
-		CookieDomain:         getEnv(constants.COOKIE_DOMAIN, ""),
-	}
+	didInitialized = true
 }
 
 func parseAllowedOrigins(originsEnv string) []string {
